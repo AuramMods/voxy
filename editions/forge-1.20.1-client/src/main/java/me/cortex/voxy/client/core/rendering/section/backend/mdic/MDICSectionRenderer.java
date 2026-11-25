@@ -182,20 +182,18 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         MemoryUtil.memPutInt(ptr, viewport.frameId&0x7fffffff); ptr += 4;
         writeNative(ptr, viewport.innerTranslation); ptr += 4*3;
         MemoryUtil.memPutFloat(ptr, this.fluidDatumY); ptr += 4;
-        // The 1.20.1 client has no LOD boundary fade. Keep the scene-layout
-        // slots as zero padding for shader/UBO compatibility.
-        MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
+        float near = Math.max(16, Minecraft.getInstance().options.getEffectiveRenderDistance() * 16);
+        MemoryUtil.memPutFloat(ptr, Math.max(near - 16, 0)); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
         int curveRatio = me.cortex.voxy.client.config.VoxyConfig.CONFIG.earthCurveRatio;
         MemoryUtil.memPutFloat(ptr, curveRatio >= 50 ? 6371000.0f / curveRatio : 0.0f); ptr += 4;
-        MemoryUtil.memPutFloat(ptr, Math.max(Minecraft.getInstance().options.getEffectiveRenderDistance() * 16.0f - 16.0f, 16.0f)); ptr += 4;
+        MemoryUtil.memPutFloat(ptr, Math.max(near - 16, 16)); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
 
         var config = me.cortex.voxy.client.config.VoxyConfig.CONFIG;
-        float near = Math.max(16, Minecraft.getInstance().options.getEffectiveRenderDistance() * 16);
         float far = config.distantTrackMaxChunks == 0 ? config.getLodRenderDistanceBlocks() : config.distantTrackMaxChunks * 16;
         MemoryUtil.memPutFloat(ptr, me.cortex.voxy.client.compat.distant.TrackLodReplacement.enabled() ? 1 : 0); ptr += 4;
         MemoryUtil.memPutFloat(ptr, near * near); ptr += 4;
@@ -212,7 +210,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         this.modelStore.bind(3, 4, 0);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, viewport.positionScratchBuffer.id);
         LightMapHelper.bind(1);
-        glBindTextureUnit(2, viewport.depthBoundingBuffer.getDepthTex().id);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, viewport.nearTerrainSections.id);
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, SharedIndexBuffer.INSTANCE.id());
         glBindBuffer(GL_DRAW_INDIRECT_BUFFER, viewport.drawCallBuffer.id);

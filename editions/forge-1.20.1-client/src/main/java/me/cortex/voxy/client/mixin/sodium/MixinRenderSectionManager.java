@@ -43,12 +43,6 @@ public class MixinRenderSectionManager {
         CommandList commandList,
         CallbackInfo ci
     ) {
-        if (level.levelRenderer != null) {
-            var system = ((IGetVoxyRenderSystem)(level.levelRenderer)).voxy$getRenderSystem();
-            if (system != null) {
-                system.chunkBoundRenderer.reset();
-            }
-        }
         this.bottomSectionY = this.level.getMinBuildHeight()>>4;
     }
 
@@ -79,17 +73,6 @@ public class MixinRenderSectionManager {
             }
         }
     }
-
-    /*
-    @Inject(method = "onChunkRemoved", at = @At("HEAD"))
-    private void voxy$trackChunkRemove(int x, int z, CallbackInfo ci) {
-        if (this.level.worldRenderer != null) {
-            var system = ((IGetVoxyRenderSystem)(this.level.worldRenderer)).getVoxyRenderSystem();
-            if (system != null) {
-                system.chunkBoundRenderer.removeSection(ChunkPos.toLong(x, z));
-            }
-        }
-    }*/
 
     @Unique private long cachedChunkPos = -1;
     @Unique private int cachedChunkStatus;
@@ -167,20 +150,6 @@ public class MixinRenderSectionManager {
             }
         }
 
-        //Do some very cheeky stuff for MiB
-        if (VoxyCommon.IS_MINE_IN_ABYSS) {
-            int sector = (x+512)>>10;
-            x-=sector<<10;
-            y+=16+(256-32-sector*30);
-        }
-        long pos = SectionPos.asLong(x,y,z);
-        if (wasBuilt) {//Remove
-            //TODO: on chunk remove do ingest if is surrounded by built chunks (or when the tracker says is ok)
-
-            system.chunkBoundRenderer.removeSection(pos);
-        } else {//Add
-            system.chunkBoundRenderer.addSection(pos);
-        }
         //? if 1.21.1 {
         /*return true;
         *///? } else {

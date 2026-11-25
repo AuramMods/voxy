@@ -184,6 +184,7 @@ public class IrisShaderPatch {
         public boolean useViewportDims;
         public boolean skipShaderDepthHackFix;
         public boolean waterTransition;
+        public boolean terrainTransition;
         //public boolean deferTranslucentRendering;
         public String checkValid() {
             if (this.blending != null) {
@@ -284,6 +285,10 @@ public class IrisShaderPatch {
 
     public boolean emitToVanillaDepth() {
         return !this.patchData.excludeLodsFromVanillaDepth;
+    }
+
+    public boolean hasTerrainTransition() {
+        return this.patchData.terrainTransition;
     }
 
     public boolean hasWaterTransition() {

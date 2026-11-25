@@ -10,7 +10,6 @@
 #endif
 
 layout(binding = 0) uniform sampler2D blockModelAtlas;
-layout(binding = 2) uniform sampler2D depthTex;
 
 //#define DEBUG_RENDER
 
@@ -23,6 +22,10 @@ layout(location = 1) in vec2 uv;
 #endif
 layout(location = 2) in float boundaryDistanceSquared;
 layout(location = 3) in vec3 trackLocalPosition;
+layout(binding = 6, std430) readonly buffer NearTerrainSections {
+    uvec4 nearTerrainHeader;
+    ivec4 nearTerrainSections[];
+};
 layout(binding = 2, std430) readonly buffer TrackReplacementBlocks { ivec4 replacedTracks[]; };
 
 #ifdef DEBUG_RENDER
@@ -152,8 +155,13 @@ struct VoxyFragmentParameters {
 };
 
 void voxy_emitFragment(VoxyFragmentParameters parameters);
-#if defined TRANSLUCENT && defined VOXY_WATER_DEPTH_TEST
+#if defined VOXY_TERRAIN_TRANSITION || defined VOXY_WATER_DEPTH_TEST
 layout(binding = 3) uniform sampler2D nearOpaqueDepthTex;
+#endif
+#ifdef VOXY_TERRAIN_TRANSITION
+bool voxy_keepOpaqueWithNearDepth(float nearDepth);
+#endif
+#if defined TRANSLUCENT && defined VOXY_WATER_DEPTH_TEST
 bool voxy_keepWaterWithNearDepth(float nearDepth);
 #endif
 #else
@@ -175,13 +183,35 @@ vec4 computeColour(vec2 texturePos, vec4 colour) {
 #endif
 
 
-bool hasDedicatedTrack() {
-    if (trackReplacement.x < 0.5 || ((interData.w >> 14u) & 1u) == 0u) return false;
-    uint face = (interData.x >> 4u) & 7u;
+ivec3 fragmentBlock() {
+    uint face = getFace();
     vec3 inside = trackLocalPosition;
     uint axis = face < 2u ? 1u : (face < 4u ? 2u : 0u);
     inside[axis] += (face & 1u) == 0u ? 0.001 : -0.001;
-    ivec3 block = ivec3(floor(inside)) + baseSectionPos * 32;
+    return ivec3(floor(inside)) + baseSectionPos * 32;
+}
+
+bool submittedNearInterior() {
+    // Preserve the outer chunk of overlap. There the near depth test, and the
+    // water shader's surface test, arbitrate overlap pixel by pixel.
+    vec3 offset = trackLocalPosition - cameraSubPos;
+    float interior = nearInteriorRadius;
+    if (dot(offset.xz, offset.xz) >= interior * interior || abs(offset.y) >= interior) return false;
+    uint mask = nearTerrainHeader.x;
+    ivec3 section = fragmentBlock() >> 4;
+    uint slot = (uint(section.x) * 73856093u ^ uint(section.y) * 19349663u ^ uint(section.z) * 83492791u) & mask;
+    for (uint probes = 0u; probes <= mask; probes++) {
+        ivec4 entry = nearTerrainSections[slot];
+        if (entry.w == 0) return false;
+        if (all(equal(entry.xyz, section))) return true;
+        slot = (slot + 1u) & mask;
+    }
+    return false;
+}
+
+bool hasDedicatedTrack() {
+    if (trackReplacement.x < 0.5 || ((interData.w >> 14u) & 1u) == 0u) return false;
+    ivec3 block = fragmentBlock();
     vec3 origin = vec3((block >> 4) * 16 - baseSectionPos * 32) - cameraSubPos;
     float distanceSq = dot(origin, origin);
     if (distanceSq < trackReplacement.y || distanceSq > trackReplacement.z) return false;
@@ -255,7 +285,7 @@ void main() {
     }
 
     ivec2 pixel = ivec2(gl_FragCoord.xy);
-    bool coveredByNearSection = DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, pixel, 0).r);
+    bool coveredByNearSection = submittedNearInterior();
     #if defined TRANSLUCENT && defined PATCHED_SHADER && defined VOXY_WATER_DEPTH_TEST
     float nearDepth = texelFetch(nearOpaqueDepthTex, pixel, 0).r;
     bool hasNearOpaque = abs(nearDepth - FAR) >= 1e-5;
@@ -264,6 +294,12 @@ void main() {
             discard;
             return;
         }
+    }
+    #elif defined VOXY_TERRAIN_TRANSITION
+    float nearDepth = texelFetch(nearOpaqueDepthTex, pixel, 0).r;
+    if (coveredByNearSection || (nearDepth < 1.0 - 1e-5 && !voxy_keepOpaqueWithNearDepth(nearDepth))) {
+        discard;
+        return;
     }
     #else
     if (coveredByNearSection) {

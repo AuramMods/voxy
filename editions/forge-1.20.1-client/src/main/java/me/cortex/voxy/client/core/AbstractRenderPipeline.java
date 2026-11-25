@@ -146,7 +146,8 @@ public abstract class AbstractRenderPipeline extends TrackedObject {
     }
 
     protected int initDepthStencil(Viewport<?> viewport, int sourceFrameBuffer, int targetFb,
-                                    int srcWidth, int srcHeight, int width, int height) {
+                                    int srcWidth, int srcHeight, int width, int height,
+                                    boolean matchNearTerrain) {
         glClearNamedFramebufferfi(targetFb, GL_DEPTH_STENCIL, 0, this.properties.clearDepth(), 1);
         // using blit to copy depth from mismatched depth formats is not portable so instead a full screen pass is performed for a depth copy
         // the mismatched formats in this case is the d32 to d24s8
@@ -166,7 +167,14 @@ public abstract class AbstractRenderPipeline extends TrackedObject {
         int depthTexture = glGetNamedFramebufferAttachmentParameteri(sourceFrameBuffer, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
         glBindTextureUnit(0, depthTexture);
         glBindSampler(0, DEPTH_SAMPLER);
-        glUniform2f(1,((float)width)/srcWidth, ((float)height)/srcHeight);
+        glUniform2f(1, ((float)width)/srcWidth, ((float)height)/srcHeight);
+        glUniform1i(2, matchNearTerrain ? 1 : 0);
+        if (matchNearTerrain) {
+            writeNative(SCRATCH, viewport.vanillaProjection.invert(INVERSE_MVP));
+            nglUniformMatrix4fv(3, 1, false, SCRATCH);
+            writeNative(SCRATCH, viewport.projection);
+            nglUniformMatrix4fv(4, 1, false, SCRATCH);
+        }
         glDepthMask(true);
         glColorMask(false,false,false,false);
         this.depthStencilSetup.blit();

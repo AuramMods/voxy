@@ -32,6 +32,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
 
     private final FullscreenBlit shaderDepthHackFixTransformBlit;
     private final boolean waterTransition;
+    private final boolean terrainTransition;
     private int nearOpaqueDepth;
 
     private final GlBuffer shaderUniforms;
@@ -77,6 +78,8 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             } else {
                 this.shaderDepthHackFixTransformBlit = null;
             }
+            this.terrainTransition = data.terrainTransition && this.shaderDepthHackFixTransformBlit != null
+                    && !data.renderToVanillaDepth && !properties.isZero2One() && !properties.isReverseZ();
             this.waterTransition = data.waterTransition && this.shaderDepthHackFixTransformBlit != null && !data.renderToVanillaDepth;
 
             this.depthBlit = new FullscreenBlit(properties, "voxy:post/blit_texture_depth_cutout.frag");
@@ -136,7 +139,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             srcHeight = viewport.height;
         }
         this.nearOpaqueDepth = this.initDepthStencil(viewport, sourceFramebuffer, this.fb.framebuffer.id,
-                srcWidth, srcHeight, viewport.width, viewport.height);
+                srcWidth, srcHeight, viewport.width, viewport.height, this.terrainTransition);
         return this.fb.getDepthTex().id;
     }
 
@@ -209,7 +212,16 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     @Override
     public void setupAndBindOpaque(Viewport<?> viewport) {
         this.fb.bind();
+        if (this.terrainTransition) {
+            glStencilFunc(GL_ALWAYS, 1, 0xFF);
+            this.bindNearOpaqueDepth();
+        }
         this.doBindings();
+    }
+
+    private void bindNearOpaqueDepth() {
+        glBindTextureUnit(3, this.nearOpaqueDepth);
+        glBindSampler(3, 0);
     }
 
     @Override
@@ -219,8 +231,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             // The water shader compares against the real opaque depth. The stencil
             // only records that an opaque surface exists somewhere on the ray.
             glStencilFunc(GL_ALWAYS, 1, 0xFF);
-            glBindTextureUnit(3, this.nearOpaqueDepth);
-            glBindSampler(3, 0);
+            this.bindNearOpaqueDepth();
         }
         this.doBindings();
         if (this.data.getBlender() != null) {
@@ -264,6 +275,9 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     public String patchOpaqueShader(AbstractSectionRenderer<?, ?> renderer, String input) {
         var builder = this.buildGenericShaderHeader(renderer, input);
 
+        if (this.terrainTransition) {
+            builder.insert(input.indexOf('\n') + 1, "#define VOXY_TERRAIN_TRANSITION\n");
+        }
         builder.append(this.data.opaqueFragPatch());
 
         return builder.toString();

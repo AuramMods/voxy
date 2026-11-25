@@ -66,3 +66,9 @@ In the copied Auram world, disabling border fog removed the disc around the ship
 The ambient occlusion and shadow filter read only Minecraft's depth. A Voxy leaf and an empty sky pixel could both appear at the far plane, so the filter could borrow lighting from across the leaf silhouette. The filter now compares the near and Voxy opaque surfaces in view-space blocks and rejects taps across depth breaks. The macOS compatibility path reads both raw depths from the buffer already produced by Bliss.
 
 The old and new filters ran in the same copied Auram scene at the pumpkin hill. The exact thin line in the original screenshot still needs a comparison from that camera position.
+
+## Terrain handoff at three chunks
+
+The Forge renderer records solid sections that Embeddium added to its current terrain draw batches. In the interior, it hides cached terrain only in those same sections. It keeps one chunk of overlap at the edge so empty near pixels can still show Voxy terrain.
+
+AuramBliss enables the opaque transition in `voxy.json`. The Voxy fragment shader compares each candidate with the near surface in view space. Matching surfaces share a dithered band. Each pixel keeps one material, and the near depth remains available to the deferred passes. Outside the near interior, the water patch keeps Voxy water in front of a nearer renderer's seabed. AuramBliss still checks that the near and Voxy water surfaces match before it yields to Voxy.

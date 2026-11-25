@@ -95,7 +95,7 @@ public class NormalRenderPipeline extends AbstractRenderPipeline {
 
         glClearNamedFramebufferfv(this.fb.framebuffer.id, GL_COLOR, 0, CLEAR_COLOUR);
         this.initDepthStencil(viewport, sourceFB, this.fb.framebuffer.id,
-                viewport.width, viewport.height, viewport.width, viewport.height);
+                viewport.width, viewport.height, viewport.width, viewport.height, false);
 
         return this.fb.getDepthTex().id;
     }

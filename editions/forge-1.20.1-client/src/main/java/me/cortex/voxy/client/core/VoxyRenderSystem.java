@@ -14,7 +14,7 @@ import me.cortex.voxy.client.core.gl.GlBuffer;
 import me.cortex.voxy.client.core.gl.GlTexture;
 import me.cortex.voxy.client.core.model.ModelBakerySubsystem;
 import me.cortex.voxy.client.core.model.ModelStore;
-import me.cortex.voxy.client.core.rendering.ChunkBoundRenderer;
+import me.cortex.voxy.client.core.rendering.NearTerrainCoverage;
 import me.cortex.voxy.client.core.rendering.RenderDistanceTracker;
 import me.cortex.voxy.client.core.rendering.Viewport;
 import me.cortex.voxy.client.core.rendering.ViewportSelector;
@@ -74,7 +74,7 @@ public class VoxyRenderSystem {
     private final HierarchicalOcclusionTraverser traversal;
 
     private final RenderDistanceTracker renderDistanceTracker;
-    public final ChunkBoundRenderer chunkBoundRenderer;
+    public final NearTerrainCoverage nearTerrainCoverage;
 
     private final ViewportSelector<?> viewportSelector;
 
@@ -190,7 +190,7 @@ public class VoxyRenderSystem {
                 this.setRenderDistance(VoxyConfig.CONFIG.sectionRenderDistance);
             }
 
-            this.chunkBoundRenderer = new ChunkBoundRenderer(this.pipeline);
+            this.nearTerrainCoverage = new NearTerrainCoverage();
 
             Logger.info("Voxy render system created with " + this.geometryData.getMaxCapacity() + " geometry capacity, using pipeline '" + this.pipeline.getClass().getSimpleName() + "' with renderer '" + sectionRenderer.getClass().getSimpleName() + "'");
 
@@ -307,14 +307,9 @@ public class VoxyRenderSystem {
 
         this.pipeline.preSetup(viewport);
 
-        // 遮挡深度的清除和光栅写入都需要显式开启写掩码。
         GlStateManager._depthMask(true);
         TimingStatistics.E.start();
-        if ((!VoxyClient.disableSodiumChunkRender())&&!IrisUtil.irisShadowActive()) {
-            this.chunkBoundRenderer.render(viewport);
-        } else {
-            viewport.depthBoundingBuffer.clear(this.properties.inverseClearDepth());
-        }
+        this.nearTerrainCoverage.upload(viewport, !VoxyClient.disableSodiumChunkRender());
         TimingStatistics.E.stop();
 
         GPUTiming.INSTANCE.marker();
@@ -378,28 +373,6 @@ public class VoxyRenderSystem {
         //TimingStatistics.I.start();
         //glFlush();
         //TimingStatistics.I.stop();
-
-        /*
-        TimingStatistics.F.start();
-        this.postProcessing.setup(viewport.width, viewport.height, boundFB);
-        TimingStatistics.F.stop();
-
-        this.renderer.renderFarAwayOpaque(viewport, this.chunkBoundRenderer.getDepthBoundTexture());
-
-        TimingStatistics.F.start();
-        //Compute the SSAO of the rendered terrain, TODO: fix it breaking depth or breaking _something_ am not sure what
-        this.postProcessing.computeSSAO(viewport.MVP);
-        TimingStatistics.F.stop();
-
-        TimingStatistics.G.start();
-        //We can render the translucent directly after as it is the furthest translucent objects
-        this.renderer.renderFarAwayTranslucent(viewport, this.chunkBoundRenderer.getDepthBoundTexture());
-        TimingStatistics.G.stop();
-
-        TimingStatistics.F.start();
-        this.postProcessing.renderPost(viewport, matrices.projection(), boundFB);
-        TimingStatistics.F.stop();
-         */
     }
 
     private long getModelBakeBudgetNanos() {
@@ -577,7 +550,7 @@ public class VoxyRenderSystem {
             if (this.modelService != null) cleanup.run(this.modelService::shutdown);
             interrupted |= Thread.interrupted();
             cleanup.run(() -> DownloadStream.INSTANCE.flushWaitClear());
-            if (this.chunkBoundRenderer != null) cleanup.run(this.chunkBoundRenderer::free);
+            if (this.nearTerrainCoverage != null) cleanup.run(this.nearTerrainCoverage::free);
             if (this.viewportSelector != null) cleanup.run(this.viewportSelector::free);
             if (this.pipeline != null) cleanup.run(this.pipeline::free);
             if (this.traversal != null) cleanup.run(this.traversal::free);

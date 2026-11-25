@@ -4,7 +4,7 @@ layout(binding = 0, std140) uniform SceneUniform {
     uint frameId;
     vec3 cameraSubPos;
     float fluidDatumY;
-    float sceneBoundaryPadding0;
+    float nearInteriorRadius;
     float sceneBoundaryPadding1;
     float sceneBoundaryPadding2;
     float _scenePadding;

@@ -56,6 +56,7 @@ public class IrisVoxyRenderPipelineData {
     public final boolean useViewportDims;
     public final boolean deferTranslucency;
     public final boolean waterTransition;
+    public final boolean terrainTransition;
     public boolean skipShaderDepthHackFix;
 
     private IrisVoxyRenderPipelineData(IrisShaderPatch patch, int[] opaqueDrawTargets, int[] translucentDrawTargets, StructLayout uniformSet, Runnable blendingSetup, ImageSet imageSet, SSBOSet ssboSet) {
@@ -73,6 +74,7 @@ public class IrisVoxyRenderPipelineData {
         this.useViewportDims = patch.useViewportDims();
         this.deferTranslucency = patch.deferedTranslucentRendering();
         this.waterTransition = patch.hasWaterTransition();
+        this.terrainTransition = patch.hasTerrainTransition();
         this.skipShaderDepthHackFix = patch.skipShaderDepthHackFix();
     }
 
