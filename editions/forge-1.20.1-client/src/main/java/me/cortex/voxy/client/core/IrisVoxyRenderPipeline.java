@@ -31,6 +31,8 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     public final DepthFramebuffer fbTranslucent;
 
     private final FullscreenBlit shaderDepthHackFixTransformBlit;
+    private final boolean waterTransition;
+    private int nearOpaqueDepth;
 
     private final GlBuffer shaderUniforms;
 
@@ -75,6 +77,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             } else {
                 this.shaderDepthHackFixTransformBlit = null;
             }
+            this.waterTransition = data.waterTransition && this.shaderDepthHackFixTransformBlit != null && !data.renderToVanillaDepth;
 
             this.depthBlit = new FullscreenBlit(properties, "voxy:post/blit_texture_depth_cutout.frag");
         } catch (RuntimeException | Error failure) {
@@ -132,7 +135,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             srcWidth = viewport.width;
             srcHeight = viewport.height;
         }
-        this.initDepthStencil(viewport, sourceFramebuffer, this.fb.framebuffer.id,
+        this.nearOpaqueDepth = this.initDepthStencil(viewport, sourceFramebuffer, this.fb.framebuffer.id,
                 srcWidth, srcHeight, viewport.width, viewport.height);
         return this.fb.getDepthTex().id;
     }
@@ -212,6 +215,13 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     @Override
     public void setupAndBindTranslucent(Viewport<?> viewport) {
         this.fbTranslucent.bind();
+        if (this.waterTransition) {
+            // The water shader compares against the real opaque depth. The stencil
+            // only records that an opaque surface exists somewhere on the ray.
+            glStencilFunc(GL_ALWAYS, 1, 0xFF);
+            glBindTextureUnit(3, this.nearOpaqueDepth);
+            glBindSampler(3, 0);
+        }
         this.doBindings();
         if (this.data.getBlender() != null) {
             this.data.getBlender().run();
@@ -264,8 +274,8 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
         if (this.data.translucentFragPatch() == null) return null;
 
         var builder = this.buildGenericShaderHeader(renderer, input);
-        if (this.data.waterTransition) {
-            builder.insert(input.indexOf('\n') + 1, "#define VOXY_WATER_TRANSITION\n");
+        if (this.waterTransition) {
+            builder.insert(input.indexOf('\n') + 1, "#define VOXY_WATER_DEPTH_TEST\n");
         }
         builder.append(this.data.translucentFragPatch());
         return builder.toString();

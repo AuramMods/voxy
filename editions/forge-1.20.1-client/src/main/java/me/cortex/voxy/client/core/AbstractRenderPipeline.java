@@ -145,7 +145,7 @@ public abstract class AbstractRenderPipeline extends TrackedObject {
         glBindFramebuffer(GL_FRAMEBUFFER, sourceFrameBuffer);
     }
 
-    protected void initDepthStencil(Viewport<?> viewport, int sourceFrameBuffer, int targetFb,
+    protected int initDepthStencil(Viewport<?> viewport, int sourceFrameBuffer, int targetFb,
                                     int srcWidth, int srcHeight, int width, int height) {
         glClearNamedFramebufferfi(targetFb, GL_DEPTH_STENCIL, 0, this.properties.clearDepth(), 1);
         // using blit to copy depth from mismatched depth formats is not portable so instead a full screen pass is performed for a depth copy
@@ -176,6 +176,7 @@ public abstract class AbstractRenderPipeline extends TrackedObject {
         //Make voxy terrain render only where there isnt mc terrain
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
         glStencilFunc(GL_EQUAL, 1, 0xFF);
+        return depthTexture;
     }
 
     private static final long SCRATCH = MemoryUtil.nmemAlloc(4*4*4);

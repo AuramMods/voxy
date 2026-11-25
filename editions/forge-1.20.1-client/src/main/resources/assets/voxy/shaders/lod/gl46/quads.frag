@@ -152,8 +152,9 @@ struct VoxyFragmentParameters {
 };
 
 void voxy_emitFragment(VoxyFragmentParameters parameters);
-#if defined TRANSLUCENT && defined VOXY_WATER_TRANSITION
-bool voxy_keepWaterOverlap();
+#if defined TRANSLUCENT && defined VOXY_WATER_DEPTH_TEST
+layout(binding = 3) uniform sampler2D nearOpaqueDepthTex;
+bool voxy_keepWaterWithNearDepth(float nearDepth);
 #endif
 #else
 
@@ -253,18 +254,23 @@ void main() {
         return;
     }
 
-    if (DEPTH_SCALAR_COMPARE(gl_FragCoord.z,
-            texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {
-        #if defined TRANSLUCENT && defined PATCHED_SHADER && defined VOXY_WATER_TRANSITION
-        if (!useIndependentWaterBoundary() || getFace() != 1u || !voxy_keepWaterOverlap()) {
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    bool coveredByNearSection = DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, pixel, 0).r);
+    #if defined TRANSLUCENT && defined PATCHED_SHADER && defined VOXY_WATER_DEPTH_TEST
+    float nearDepth = texelFetch(nearOpaqueDepthTex, pixel, 0).r;
+    bool hasNearOpaque = abs(nearDepth - FAR) >= 1e-5;
+    if (coveredByNearSection || hasNearOpaque) {
+        if (!useIndependentWaterBoundary() || getFace() != 1u || !voxy_keepWaterWithNearDepth(nearDepth)) {
             discard;
             return;
         }
-        #else
+    }
+    #else
+    if (coveredByNearSection) {
         discard;
         return;
-        #endif
     }
+    #endif
 
 
     //Also, small quad is really fking over the mipping level somehow

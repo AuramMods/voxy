@@ -46,3 +46,11 @@ Water reflections map the reflected ray to the lowest cloud layer and aim the ca
 Voxy converts lightmap sample centers to the same normalized levels as near terrain. Near and distant foliage share the same subsurface-scattering assignments. Voxy now writes raw specular channels to `colortex8` for the compatibility pass to pack, and the lighting pass reconstructs Voxy receivers at their actual depth.
 
 The spruce panel fixture and open terrain were checked across shader reloads. The distant bridge still differed in brightness at the geometry boundary. Opaque terrain continues to switch renderers at the section boundary.
+
+## Depth at the water and lighting handoffs
+
+The Voxy water pass checks the opaque depth from Embeddium before applying the overlap dither. This lets distant water cover a nearer seabed when the water is in front of it. The fog and water passes compare the near and Voxy front depths in view space, so they use the surface that actually covers the pixel.
+
+The penumbra, ambient occlusion, and contact shadow passes now use Voxy's projection for Voxy terrain. With the same camera and daylight, a strip of the test bridge that was visibly darker than the rest of the bridge matched the surrounding blocks after shader reload.
+
+The full Auram fixture uses five chunks of near render distance and includes a pool with shallow and deep sections, a stone pillar, and a continuous bridge. The rebuilt client draws water over both pool floors from two camera positions. A temporary diagnostic color confirmed Voxy water coverage in front of Embeddium's opaque depth. The water change requires the rebuilt jar and a client restart.
