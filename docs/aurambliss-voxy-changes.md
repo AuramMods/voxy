@@ -74,3 +74,9 @@ The Forge renderer records solid sections that Embeddium added to its current te
 AuramBliss enables the opaque transition in `voxy.json`. The Voxy fragment shader compares each candidate with the near surface in view space. Matching surfaces share a dithered band. Each pixel keeps one material, and the near depth remains available to the deferred passes. Outside the near interior, the water patch keeps Voxy water in front of a nearer renderer's seabed. AuramBliss still checks that the near and Voxy water surfaces match before it yields to Voxy.
 
 A newly submitted solid section takes 180 ms to reach its normal blend weight. Its first submission time resets when it drops out of the draw list, so a returning section gets a fresh transition. Distant water keeps its own depth tests. Voxy's internal LoD levels still switch at the traversal threshold.
+
+## Daylight brightness during the opaque handoff
+
+When Voxy wins an overlap pixel, the deferred shader still uses Embeddium's depth for that pixel. Voxy now writes the shading normal in world space and the flat normal in view space for those pixels, matching the near terrain format. Before the change, the sun direction and shadow bias used normals from the wrong coordinate spaces. The shader keeps the same dither and uses the existing shadow pass.
+
+At three chunks on macOS, a fixed daylight camera viewed a white concrete panel with forced 0%, 50%, and 100% Voxy selection in the overlap. The old shader reduced the panel's sampled brightness by about 12% at half coverage. The patched captures matched the near-only reference to within one 8-bit luma level across all three weights in the sunlit sample. The normal distance-based shader also reloaded and rendered successfully. The change takes effect on shader reload.
