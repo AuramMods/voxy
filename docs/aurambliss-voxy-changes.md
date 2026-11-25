@@ -106,3 +106,9 @@ Bliss's screen-space contact trace moved its start each frame and marked a pixel
 Use `python3 tools/frame_luma_diff.py before.png after.png diff.png --crop 890 215 1740 550` from the repository root to compare a stationary camera's screenshots. The crop covers the spruce canopy in the original Auram captures. Orange shows brightening and blue shows darkening. The script uses Pillow and NumPy.
 
 In the three-chunk macOS smoke client with 80% TAA upscaling, the 99th-percentile change in the spruce contact-shadow diagnostic fell from 13 to 6 display levels. The diagnostic isolates the contact trace from ambient occlusion and shadow-map variation. In the regular shader, the mean frame-to-frame luma change in the same crop fell from 2.9 to 2.7 levels out of 255. The final shader reloaded and rendered with the existing Voxy jar.
+
+## Scattering mode and foliage at the handoff
+
+The Overworld now applies contact and cloud shadows independently of the subsurface scattering mode. The contact ray uses the foliage marker to choose its reach. Near and Voxy terrain use the same leaf and grass markers, including the leaf marker that Bliss uses to calculate skylight scattering. The two-chunk sunlight extension uses the same depth-aware blocker filter as near terrain.
+
+In a fixed daylight scene on macOS at three chunks, switching from None to Hardcoded only previously shifted the mean brightness of a stone cliff by 49 luma levels out of 255. With the patch, the shift was under one level and the tree crop still gained about 19 levels. A temporary material diagnostic on adjacent oak and stone strips confirmed that the same foliage marker and hardcoded scattering density cross the Embeddium-to-Voxy boundary. The change takes effect on shader reload.
