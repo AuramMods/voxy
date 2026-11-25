@@ -72,3 +72,5 @@ The old and new filters ran in the same copied Auram scene at the pumpkin hill. 
 The Forge renderer records solid sections that Embeddium added to its current terrain draw batches. In the interior, it hides cached terrain only in those same sections. It keeps one chunk of overlap at the edge so empty near pixels can still show Voxy terrain.
 
 AuramBliss enables the opaque transition in `voxy.json`. The Voxy fragment shader compares each candidate with the near surface in view space. Matching surfaces share a dithered band. Each pixel keeps one material, and the near depth remains available to the deferred passes. Outside the near interior, the water patch keeps Voxy water in front of a nearer renderer's seabed. AuramBliss still checks that the near and Voxy water surfaces match before it yields to Voxy.
+
+A newly submitted solid section takes 180 ms to reach its normal blend weight. Its first submission time resets when it drops out of the draw list, so a returning section gets a fresh transition. Distant water keeps its own depth tests. Voxy's internal LoD levels still switch at the traversal threshold.

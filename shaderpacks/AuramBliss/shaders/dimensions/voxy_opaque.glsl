@@ -9,7 +9,7 @@
 #include "/lib/res_params.glsl"
 #include "/lib/dh_chunk_transition.glsl"
 
-bool voxy_keepOpaqueWithNearDepth(float nearDepth) {
+bool voxy_keepOpaqueWithNearDepth(float nearDepth, float nearReadiness) {
     vec2 uv = gl_FragCoord.xy * texelSize / RENDER_SCALE;
     vec4 view = vxProjInv * vec4(vec3(uv, gl_FragCoord.z) * 2.0 - 1.0, 1.0);
     vec3 lod = view.xyz / view.w;
@@ -22,6 +22,7 @@ bool voxy_keepOpaqueWithNearDepth(float nearDepth) {
     float nearDistance = vxNearRenderDistance;
     float coverage = smoothstep(max(nearDistance - 16.0, 0.0), nearDistance + 8.0,
                                 dhChunkDistance(relativePosition));
+    if (nearReadiness >= 0.0) coverage = mix(1.0, coverage, nearReadiness);
     return dhTransitionDither(frameCounter) < coverage;
 }
 #endif

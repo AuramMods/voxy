@@ -28,7 +28,7 @@ bool voxy_keepWaterWithNearDepth(float nearDepth) {
     }
     #ifdef VOXY_SUBMITTED_NEAR_COVERAGE
         // Opaque depth beneath the water does not prove a near water mesh exists.
-        if (!submittedNearInterior()) return true;
+        if (!submittedNearInterior(nearSectionReadiness())) return true;
     #endif
     vec3 waterPosition = (vxModelViewInv * vec4(viewPosition, 1.0)).xyz;
     return dhTransitionDither(frameCounter) < voxyWaterCoverage(dhChunkDistance(waterPosition), vxNearRenderDistance);

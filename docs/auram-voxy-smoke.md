@@ -65,3 +65,9 @@ The uncapped Auram copy reached 85, 103, 98, and 5 FPS before and after three sh
 Auram's block atlas measures 16384 by 16384 pixels. For atlases of this size on GLA, the Forge client uploads animated frames into a small reusable texture and blits them into the atlas on the GPU. Each copy uses Minecraft's original frame rectangle and mip level. The client releases the staging texture and framebuffers at shutdown.
 
 The rebuilt client measured 62 FPS after launch and 80 FPS after eight confirmed shader reloads. Four different portal frames read back from the atlas matched their source pixels exactly. The client reopened the same local world twice without restarting. After another shader reload following each rejoin, it measured 47 and 68 FPS, and portal frames still updated. Remote multiplayer reconnects remain unverified.
+
+## Three-chunk terrain handoff
+
+The macOS smoke client used three chunks of near render distance. It crossed multiple chunk coordinates over the shoreline at Y 102, then toggled shaders off and on and reloaded AuramBliss. The shoreline and distant water were visible after the renderer settled. A temporary magenta material identified pixels where Voxy and Embeddium drew matching opaque surfaces inside the overlap. The regular shader has no diagnostic color.
+
+The screenshots are in `evidence/three-chunk-handoff/` in the Prism smoke profile. A shader reload still rebuilds the Voxy draw data, which can briefly leave the scene incomplete.

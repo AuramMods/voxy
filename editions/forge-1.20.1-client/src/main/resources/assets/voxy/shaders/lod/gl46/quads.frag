@@ -159,7 +159,7 @@ void voxy_emitFragment(VoxyFragmentParameters parameters);
 layout(binding = 3) uniform sampler2D nearOpaqueDepthTex;
 #endif
 #ifdef VOXY_TERRAIN_TRANSITION
-bool voxy_keepOpaqueWithNearDepth(float nearDepth);
+bool voxy_keepOpaqueWithNearDepth(float nearDepth, float nearReadiness);
 #endif
 #if defined TRANSLUCENT && defined VOXY_WATER_DEPTH_TEST
 bool voxy_keepWaterWithNearDepth(float nearDepth);
@@ -191,22 +191,31 @@ ivec3 fragmentBlock() {
     return ivec3(floor(inside)) + baseSectionPos * 32;
 }
 
-bool submittedNearInterior() {
-    // Preserve the outer chunk of overlap. There the near depth test, and the
-    // water shader's surface test, arbitrate overlap pixel by pixel.
+const float nearHandoffDurationMs = 180.0;
+
+float nearSectionReadiness() {
     vec3 offset = trackLocalPosition - cameraSubPos;
-    float interior = nearInteriorRadius;
-    if (dot(offset.xz, offset.xz) >= interior * interior || abs(offset.y) >= interior) return false;
+    float overlap = nearInteriorRadius + 24.0;
+    if (dot(offset.xz, offset.xz) >= overlap * overlap) return -1.0;
     uint mask = nearTerrainHeader.x;
     ivec3 section = fragmentBlock() >> 4;
     uint slot = (uint(section.x) * 73856093u ^ uint(section.y) * 19349663u ^ uint(section.z) * 83492791u) & mask;
     for (uint probes = 0u; probes <= mask; probes++) {
         ivec4 entry = nearTerrainSections[slot];
-        if (entry.w == 0) return false;
-        if (all(equal(entry.xyz, section))) return true;
+        if (entry.w == 0) return -1.0;
+        if (all(equal(entry.xyz, section))) {
+            return smoothstep(0.0, nearHandoffDurationMs, float(nearTerrainTime - uint(entry.w)));
+        }
         slot = (slot + 1u) & mask;
     }
-    return false;
+    return -1.0;
+}
+
+bool submittedNearInterior(float readiness) {
+    // Keep the overlap and freshly submitted terrain until the handoff has settled.
+    vec3 offset = trackLocalPosition - cameraSubPos;
+    float interior = nearInteriorRadius;
+    return readiness >= 1.0 && dot(offset.xz, offset.xz) < interior * interior && abs(offset.y) < interior;
 }
 
 bool hasDedicatedTrack() {
@@ -285,7 +294,8 @@ void main() {
     }
 
     ivec2 pixel = ivec2(gl_FragCoord.xy);
-    bool coveredByNearSection = submittedNearInterior();
+    float nearReadiness = nearSectionReadiness();
+    bool coveredByNearSection = submittedNearInterior(nearReadiness);
     #if defined TRANSLUCENT && defined PATCHED_SHADER && defined VOXY_WATER_DEPTH_TEST
     float nearDepth = texelFetch(nearOpaqueDepthTex, pixel, 0).r;
     bool hasNearOpaque = abs(nearDepth - FAR) >= 1e-5;
@@ -297,7 +307,8 @@ void main() {
     }
     #elif defined VOXY_TERRAIN_TRANSITION
     float nearDepth = texelFetch(nearOpaqueDepthTex, pixel, 0).r;
-    if (coveredByNearSection || (nearDepth < 1.0 - 1e-5 && !voxy_keepOpaqueWithNearDepth(nearDepth))) {
+    bool hasNearSurface = nearDepth < 1.0 - 1e-5;
+    if (hasNearSurface ? !voxy_keepOpaqueWithNearDepth(nearDepth, nearReadiness) : coveredByNearSection) {
         discard;
         return;
     }

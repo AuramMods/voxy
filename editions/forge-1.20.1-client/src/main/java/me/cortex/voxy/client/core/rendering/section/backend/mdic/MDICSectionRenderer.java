@@ -184,7 +184,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         MemoryUtil.memPutFloat(ptr, this.fluidDatumY); ptr += 4;
         float near = Math.max(16, Minecraft.getInstance().options.getEffectiveRenderDistance() * 16);
         MemoryUtil.memPutFloat(ptr, Math.max(near - 16, 0)); ptr += 4;
-        MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
+        MemoryUtil.memPutInt(ptr, viewport.nearTerrainTime); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0.0f); ptr += 4;
         int curveRatio = me.cortex.voxy.client.config.VoxyConfig.CONFIG.earthCurveRatio;

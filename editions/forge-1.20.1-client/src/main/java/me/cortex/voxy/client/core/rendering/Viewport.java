@@ -12,6 +12,7 @@ public abstract class Viewport <A extends Viewport<A>> {
     //public final HiZBuffer2 hiZBuffer = new HiZBuffer2();
     public final HiZBuffer hiZBuffer;
     public GlBuffer nearTerrainSections;
+    public int nearTerrainTime;
 
     private static final Field planesField;
     static {

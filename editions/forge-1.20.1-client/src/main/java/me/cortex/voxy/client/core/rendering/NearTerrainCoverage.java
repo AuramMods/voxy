@@ -1,15 +1,17 @@
 package me.cortex.voxy.client.core.rendering;
 
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import me.cortex.voxy.client.core.gl.GlBuffer;
 import me.cortex.voxy.client.core.rendering.util.UploadStream;
+import net.minecraft.Util;
 import net.minecraft.core.SectionPos;
 import org.lwjgl.system.MemoryUtil;
 
 /** Solid Embeddium sections submitted in the current main terrain pass. */
 public final class NearTerrainCoverage {
     private final LongOpenHashSet submitted = new LongOpenHashSet();
-    private final LongOpenHashSet uploaded = new LongOpenHashSet();
+    private final Long2IntOpenHashMap firstSubmission = new Long2IntOpenHashMap();
     private GlBuffer buffer = new GlBuffer(48);
     private boolean initialized;
 
@@ -23,13 +25,19 @@ public final class NearTerrainCoverage {
 
     public void upload(Viewport<?> viewport, boolean enabled) {
         if (!enabled) this.submitted.clear();
-        if (!this.initialized || !this.uploaded.equals(this.submitted)) {
+        // Reserve zero for empty slots. Unsigned age subtraction also handles clock wrap.
+        int now = (int) Util.getMillis() | 1;
+        if (!this.initialized || !this.firstSubmission.keySet().equals(this.submitted)) {
+            this.firstSubmission.keySet().retainAll(this.submitted);
+            var sections = this.submitted.iterator();
+            while (sections.hasNext()) {
+                this.firstSubmission.putIfAbsent(sections.nextLong(), now);
+            }
             this.upload();
             this.initialized = true;
-            this.uploaded.clear();
-            this.uploaded.addAll(this.submitted);
         }
         viewport.nearTerrainSections = this.buffer;
+        viewport.nearTerrainTime = now;
         // Never let a pass reuse a collection from a frame where no solid draw ran.
         this.submitted.clear();
     }
@@ -60,7 +68,7 @@ public final class NearTerrainCoverage {
             MemoryUtil.memPutInt(entry, x);
             MemoryUtil.memPutInt(entry + 4, y);
             MemoryUtil.memPutInt(entry + 8, z);
-            MemoryUtil.memPutInt(entry + 12, 1);
+            MemoryUtil.memPutInt(entry + 12, this.firstSubmission.get(pos));
         }
         UploadStream.INSTANCE.commit();
     }
