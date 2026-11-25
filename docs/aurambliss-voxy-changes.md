@@ -30,3 +30,7 @@ The Voxy translucent pass referenced an undefined `debug_ALBEDO` mode. GLSL eval
 ## Volumetric clouds in front of and behind Voxy terrain
 
 The cloud ray marcher now stops at Voxy's depth when a pixel contains distant terrain. It uses the same inverse-projection helper as the cloud shadow calculation. At the same camera position, a distant panel below the cloud layer occluded clouds behind it after reload, while a higher panel still had clouds in front.
+
+## Shader water beyond the near render distance
+
+The water passes now reconstruct both the Voxy water surface and the opaque terrain beneath it. This gives absorption, caustics, and underwater fog the depth difference they need. In the daylight smoke test, the distant river regained a visible surface and hid the deeper riverbed. At midnight, the near and distant water stayed dark.
