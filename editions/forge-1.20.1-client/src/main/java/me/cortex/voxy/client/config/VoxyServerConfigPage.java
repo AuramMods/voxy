@@ -27,6 +27,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.function.IntFunction;
 import java.util.function.Predicate;
 
 final class VoxyServerConfigPage implements OptionStorage<CommentedConfig> {
@@ -54,15 +55,26 @@ final class VoxyServerConfigPage implements OptionStorage<CommentedConfig> {
                 .add(storage.list("dimensions", ServerVoxyConfig.SPAWN_DIMENSIONS, ServerVoxyConfig::isDimensionId))
                 .add(storage.list("anchors", ServerVoxyConfig.SPAWN_ANCHORS, ServerVoxyConfig::isSpawnAnchor))
                 .build();
-        return new OptionPage(Component.translatable(KEY), ImmutableList.of(generation, spawn));
+        IntFunction<Component> bandwidth = value -> Component.literal(value + " KiB/s");
+        var streaming = OptionGroup.createBuilder()
+                .add(storage.slider("playerStreamRate", ServerVoxyConfig.PLAYER_STREAM_RATE,
+                        ServerVoxyConfig.MAX_STREAM_KIB_PER_SECOND, bandwidth))
+                .add(storage.slider("serverStreamRate", ServerVoxyConfig.SERVER_STREAM_RATE,
+                        ServerVoxyConfig.MAX_STREAM_KIB_PER_SECOND, bandwidth))
+                .build();
+        return new OptionPage(Component.translatable(KEY), ImmutableList.of(generation, spawn, streaming));
     }
 
     private Option<Integer> slider(String key, ConfigValue<Integer> setting, int max) {
+        return this.slider(key, setting, max, value -> Component.literal(Integer.toString(value)));
+    }
+
+    private Option<Integer> slider(String key, ConfigValue<Integer> setting, int max, IntFunction<Component> formatter) {
         return OptionImpl.createBuilder(int.class, this)
                 .setName(Component.translatable(KEY + "." + key))
                 .setTooltip(Component.translatable(KEY + "." + key + ".tooltip"))
                 .setControl(option -> new SliderControl(option, 1, max, 1,
-                        value -> Component.literal(Integer.toString(value))))
+                        formatter::apply))
                 .setBinding((config, value) -> config.set(setting.getPath(), value),
                         config -> config.get(setting.getPath()))
                 .build();

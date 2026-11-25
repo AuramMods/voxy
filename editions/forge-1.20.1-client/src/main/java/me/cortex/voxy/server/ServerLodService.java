@@ -26,12 +26,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Mod.EventBusSubscriber(modid = "voxy", bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class ServerLodService implements AutoCloseable {
@@ -42,7 +43,8 @@ public final class ServerLodService implements AutoCloseable {
     private final MinecraftServer server;
     private final Path root;
     final UUID worldId;
-    private final Map<ResourceKey<Level>, Dimension> worlds = new HashMap<>();
+    private final Map<ResourceKey<Level>, Dimension> worlds = new ConcurrentHashMap<>();
+    private final AtomicReference<LocalLodTerrain> localTerrain = new AtomicReference<>();
     private final ThreadPoolExecutor worker;
     private final ServerLodGenerator generator;
     private final ServerLodEdits edits;
@@ -71,11 +73,19 @@ public final class ServerLodService implements AutoCloseable {
     }
 
     Dimension dimension(ServerLevel level) {
-        return this.worlds.computeIfAbsent(level.dimension(), key -> {
-            var directory = DimensionType.getStorageFolder(key, this.root).resolve("voxy-server");
+        return this.dimension(level.dimension());
+    }
+
+    private Path storagePath(ResourceKey<Level> key) {
+        return DimensionType.getStorageFolder(key, this.root).resolve("voxy-server").resolve("lod.sqlite");
+    }
+
+    private Dimension dimension(ResourceKey<Level> dimension) {
+        return this.worlds.computeIfAbsent(dimension, key -> {
+            var path = this.storagePath(key);
             try {
-                Files.createDirectories(directory);
-                var storage = new LodSectionStorage(directory.resolve("lod.sqlite"));
+                Files.createDirectories(path.getParent());
+                var storage = new LodSectionStorage(path);
                 try {
                     return new Dimension(new WorldEngine(storage), storage);
                 } catch (RuntimeException | Error ex) {
@@ -91,6 +101,35 @@ public final class ServerLodService implements AutoCloseable {
     static ServerLodService forServer(MinecraftServer server) {
         var service = current;
         return service != null && service.server == server ? service : null;
+    }
+
+    public static LocalLodTerrain openLocalTerrain(MinecraftServer server, ResourceKey<Level> key) {
+        var service = forServer(server);
+        if (service == null || server.isDedicatedServer()) return null;
+        synchronized (service) {
+            if (forServer(server) != service) return null;
+            return service.openLocalTerrain(key);
+        }
+    }
+
+    public static boolean hasLocalTerrain(MinecraftServer server, ResourceKey<Level> key) {
+        var service = forServer(server);
+        var terrain = service == null ? null : service.localTerrain.get();
+        return terrain != null && terrain.dimension().equals(key);
+    }
+
+    private LocalLodTerrain openLocalTerrain(ResourceKey<Level> key) {
+        var dimension = this.dimension(key);
+        try {
+            var terrain = new LocalLodTerrain(key, LodSectionStorage.openReadOnly(this.storagePath(key)),
+                    dimension.world().getMapper(), this.localTerrain);
+            this.localTerrain.set(terrain);
+            Logger.info("Reading Voxy LODs directly from the local save for " + key.location());
+            return terrain;
+        } catch (SQLException failure) {
+            Logger.warn("Could not open local Voxy LOD terrain for " + key.location(), failure);
+            return null;
+        }
     }
 
     public static void applyLocalConfig(MinecraftServer server, CommentedConfig config) {
@@ -118,6 +157,14 @@ public final class ServerLodService implements AutoCloseable {
 
     void publish(ServerLevel level, long[] changed) {
         this.streams.publish(level, changed);
+        this.publishLocal(level, changed);
+    }
+
+    void publishLocal(ServerLevel level, long[] changed) {
+        var terrain = this.localTerrain.get();
+        if (terrain != null && terrain.dimension().equals(level.dimension()) && changed.length != 0) {
+            this.worker.execute(() -> terrain.refresh(changed));
+        }
     }
 
     @SubscribeEvent
@@ -187,7 +234,9 @@ public final class ServerLodService implements AutoCloseable {
     public static void onStopping(ServerStoppingEvent event) {
         var service = forServer(event.getServer());
         if (service == null) return;
-        current = null;
+        synchronized (service) {
+            current = null;
+        }
         LodChannel.setServerHandler((player, request) -> {});
         service.close();
     }

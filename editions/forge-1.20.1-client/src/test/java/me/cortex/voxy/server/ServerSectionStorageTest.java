@@ -20,6 +20,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ServerSectionStorageTest {
     @Test
+    void readOnlyViewSeesCommitsAndSurvivesWriterClose(@TempDir Path temp) throws Exception {
+        var path = temp.resolve("local.sqlite");
+        long key = WorldEngine.getWorldSectionId(0, 7, 0, -8);
+        var snapshot = new LodSectionSnapshot(key, (byte) 0, SurfaceDataCoverage.raw(0),
+                new long[WorldSection.SECTION_VOLUME]);
+        try (var writer = new LodSectionStorage(path);
+             var reader = LodSectionStorage.openReadOnly(path)) {
+            assertNull(reader.read(key));
+            writer.commitColumn(1, List.of(snapshot));
+            assertEquals(1, reader.revision(key));
+            snapshot.voxels()[0] = 0x1000_0000;
+            writer.commitColumn(1, List.of(snapshot));
+            writer.close();
+            assertEquals(2, reader.revision(key));
+            assertEquals(0x1000_0000, reader.read(key).section().voxels()[0]);
+            assertThrows(IllegalStateException.class, () -> reader.commitColumn(1, List.of(snapshot)));
+        }
+    }
+
+    @Test
     void reopensCompletedColumnsRevisionsAndPalette(@TempDir Path temp) throws Exception {
         var path = temp.resolve("lod.sqlite");
         long key = WorldEngine.getWorldSectionId(4, -1, 0, 3);

@@ -46,7 +46,6 @@ import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.lwjgl.opengl.GL11;
 
-import java.util.Arrays;
 import java.util.List;
 
 import static org.lwjgl.opengl.GL11.GL_VIEWPORT;
@@ -170,7 +169,6 @@ public class VoxyRenderSystem {
 
                 world.setDirtyCallback(this.nodeManager::worldEvent);
 
-                Arrays.stream(world.getMapper().getBiomeEntries()).forEach(this.modelService::addBiome);
                 world.getMapper().setBiomeCallback(this.modelService::addBiome);
 
                 this.nodeManager.start();
@@ -385,6 +383,9 @@ public class VoxyRenderSystem {
             //Tick upload stream (this is ok to do here as upload ticking is just memory management)
             UploadStream.INSTANCE.tick();
 
+            if (me.cortex.voxy.client.network.ClientLodStream.isReadingLocalTerrain()) {
+                this.setRenderDistance(VoxyConfig.CONFIG.sectionRenderDistance);
+            }
             this.renderDistanceTracker.setProcessRate(this.getTopLevelNodeProcessRate());
             while (this.renderDistanceTracker.setCenterAndProcess(viewport.cameraX, viewport.cameraZ) && VoxyClient.isFrexActive());//While FF is active, run until everything is processed
             TimingStatistics.H.start();

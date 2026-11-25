@@ -2,7 +2,7 @@
 
 Install the same Voxy build on the Forge server and on clients that should receive its terrain. The server runs without OpenGL, Embeddium, Oculus, or a shader pack. It sends compressed voxel sections. The client resolves block and biome names against its registries, bakes resource-pack models, and builds the GPU meshes locally.
 
-The LOD channel is optional. A Voxy client can still ingest terrain from a server without the channel. Clients without Voxy can use the server when its other mods permit them to join. On a connection with the LOD channel, the streamed cache is authoritative. Minecraft draws ordinary chunks and Voxy consumes the server's LOD updates for distant terrain.
+The LOD channel is optional. A Voxy client can still ingest terrain from a server without the channel. Clients without Voxy can use the server when its other mods permit them to join. On a connection with the LOD channel, the streamed cache is authoritative. Minecraft draws ordinary chunks and Voxy consumes the server's LOD updates for distant terrain. The singleplayer host reads the world's Voxy database directly. LAN guests use the LOD channel.
 
 ## Server configuration
 
@@ -16,6 +16,8 @@ Copy that template to `<world>/serverconfig/voxy-server.toml` for an existing de
 | `radiusChunks` | `256` | Horizontal radius in Minecraft chunks for server generation and streaming. The client rendering cutoff also defaults to 256 chunks and can be lowered locally. |
 | `chunkJobs` | `4` | Maximum concurrent Voxy generation and backfill jobs with players online, including the singleplayer host. Existing configurations keep this value. |
 | `idleChunkJobs` | `4` | Maximum concurrent Voxy generation and backfill jobs when no players are online. |
+| `playerStreamKiBPerSecond` | `512` | Voxy LOD bandwidth budget per remote player, in KiB/s at 20 TPS. |
+| `serverStreamKiBPerSecond` | `2048` | Combined Voxy LOD bandwidth budget for all remote players, in KiB/s at 20 TPS. |
 | `spawnDimensions` | `['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end']` | Ordered list of dimensions with spawn anchors. IDs for missing dimensions can stay in the list. |
 | `spawnAnchors` | `[]` | Optional overrides in `dimension=x,z` form using block coordinates. The Overworld uses its saved spawn and other dimensions default to X/Z `0,0`. |
 
@@ -28,13 +30,14 @@ The server switches job limits as players join or leave. Previously started work
 ## Persistence and reconnects
 
 - The world identity is stored in `<world>/voxy-server/world-id`. Each dimension stores its LODs and coverage in `voxy-server/lod.sqlite` within that dimension's save directory. For example, the Nether uses `<world>/DIM-1/voxy-server/lod.sqlite`.
+- In singleplayer, existing LODs are available from that database as soon as the renderer opens it. When only a saved Minecraft chunk exists, the integrated server reads the region data and builds its LODs in the background, even with distant generation disabled. New commits and live edits become visible to the local renderer without waiting for a network offer, request, or send budget.
 - Prism clients store downloaded terrain under `minecraft/.voxy/saves/<server-address>/remote-lod/<world-and-dimension>/lod.sqlite`. A warm reconnect checks cached content before downloading tile payloads. The client can keep displaying cached coarse geometry during refinement.
 - Include the world ID and LOD databases with vanilla region data in a coordinated backup or restore. If restoring only region files, stop the server and move the corresponding `voxy-server` directories out of the save before starting it. Voxy can backfill the restored regions with generation disabled.
 - The optional channel scopes packets by world, dimension, and connection. Portable content fingerprints reconcile caches across server restarts and restores, even when the restored server has lower revision numbers.
 
 The renderer uses the current camera, viewport, and render precision to estimate the section detail it needs. The client prioritizes visible groups with missing data and follows the cached child masks to locate finer geometry. It also includes the coarse ancestors required to draw those groups. Turning, moving, and zooming can change the priority. The server checks every requested tile against the player's actual dimension and position. Fingerprint reconciliation keeps cached payloads reusable when the view priority changes.
 
-Background delivery sends the coarsest level across the entire server radius. Its finer levels reach approximately 12, 24, 48, and 96 chunks for LODs 0 through 3. A visible request can refine terrain farther away when its projected size calls for it. The client keeps coarse geometry available while it receives the finer tiles needed to replace it. Stream payloads and offers share a 512 KiB/s per-client and 2 MiB/s global budget.
+Background delivery sends the coarsest level across the entire server radius. Its finer levels reach approximately 12, 24, 48, and 96 chunks for LODs 0 through 3. A visible request can refine terrain farther away when its projected size calls for it. The client keeps coarse geometry available while it receives the finer tiles needed to replace it. Stream payloads and offers share both bandwidth budgets. At very low rates, a large section may wait while enough credit accumulates to send it in one packet.
 
 ## Verification
 
@@ -53,5 +56,7 @@ Measured on macOS with Forge 47.4.10, Java 17, GLA, Embeddium, Oculus, and Auram
 The same camera showed only sky in the control run on a Forge client without Voxy. A distant tower added and removed seven chunks from the client appeared and disappeared live. After restoring the regions and Voxy database together, the client accepted the older authoritative revisions. The ticket trace recorded four releases during shutdown. It also recorded four releases followed by retries after a deliberately induced timeout.
 
 In a separate 128-chunk test, a landmark 50 chunks away was cached at LODs 3 and 4 while its LOD 0 tile stayed out of the client cache. After teleporting to within 10 chunks, the fine tile arrived in 15.2 seconds. The vanilla view distance stayed at three chunks. After the cache caught up, reconnecting at the same position received zero compressed tile payload bytes during the 44-second check.
+
+On the macOS singleplayer smoke client, a copy of an existing save started with an empty Voxy database, distant generation disabled, and both stream budgets set to 1 KiB/s. Voxy imported saved columns, drew terrain beyond the three-chunk view distance, and showed a red marker 62 blocks away being placed and removed. The client logged zero streamed terrain bytes and the new database contained zero wire tiles. A separate TCP connection to a local dedicated server with 8 KiB/s per player and 4 KiB/s total received terrain through the network channel.
 
 The 541-jar Auram client connected at three-chunk vanilla distance and rendered a streamed tower with AuramBliss. Both the server and the client recorded block light levels of 15, 14, and 13 at the glowstone and the two voxels above it. The disposable server used the pack's server-side exclusions, retained GuideME for Applied Energistics 2, and used a 240-second startup watchdog threshold to let WorldEdit finish indexing block states. Distant Horizons rendering was disabled on the client. The available Windows VM entries were invalid, so the platform smoke test was on macOS.

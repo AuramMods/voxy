@@ -13,6 +13,8 @@ import me.cortex.voxy.common.world.SurfaceDataCoverage;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
+import me.cortex.voxy.server.ServerLodService;
+import me.cortex.voxy.server.ServerVoxyConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.RegistryAccess;
 import net.minecraftforge.api.distmarker.Dist;
@@ -29,7 +31,6 @@ import java.util.concurrent.TimeUnit;
 
 @Mod.EventBusSubscriber(modid = "voxy", value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class ClientLodStream {
-    private static final int ALL_MESH_NEIGHBORS = 0x3f | (0xf << 6) | (0xf << 10) | (0xf << 14) | (3 << 18);
     private static volatile Context context;
     private static volatile LodChannel.Scope announced;
     private static ThreadPoolExecutor worker;
@@ -88,10 +89,20 @@ public final class ClientLodStream {
     public static boolean hasScope() {
         var scope = announced;
         var level = Minecraft.getInstance().level;
-        return scope != null && level != null && scope.dimension().equals(level.dimension().location());
+        return level != null && (isReadingLocalTerrain()
+                || scope != null && scope.dimension().equals(level.dimension().location()));
+    }
+
+    public static boolean isReadingLocalTerrain() {
+        var client = Minecraft.getInstance();
+        return client.level != null && ServerLodService.hasLocalTerrain(client.getSingleplayerServer(),
+                client.level.dimension());
     }
 
     public static float clampRadius(float blocks) {
+        if (isReadingLocalTerrain()) {
+            return Math.min(blocks, ServerVoxyConfig.RADIUS.get() * 16f);
+        }
         var ready = announced;
         var level = Minecraft.getInstance().level;
         return ready == null || level == null || !ready.dimension().equals(level.dimension().location())
@@ -322,6 +333,6 @@ public final class ClientLodStream {
 
     private static void notifyRenderer(WorldEngine world, WorldSection section) {
         world.markDirty(section, WorldEngine.DEFAULT_UPDATE_FLAGS | WorldEngine.UPDATE_TYPE_DONT_SAVE,
-                ALL_MESH_NEIGHBORS);
+                WorldEngine.ALL_MESH_NEIGHBORS);
     }
 }

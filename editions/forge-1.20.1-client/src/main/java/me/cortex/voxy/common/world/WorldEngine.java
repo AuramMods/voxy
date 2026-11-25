@@ -20,6 +20,7 @@ public final class WorldEngine {
     public static final int UPDATE_TYPE_CHILD_EXISTENCE_BIT = 2;
     public static final int UPDATE_TYPE_DONT_SAVE = 4;
     public static final int DEFAULT_UPDATE_FLAGS = UPDATE_TYPE_BLOCK_BIT | UPDATE_TYPE_CHILD_EXISTENCE_BIT;
+    public static final int ALL_MESH_NEIGHBORS = 0x3f | (0xf << 6) | (0xf << 10) | (0xf << 14) | (3 << 18);
 
     public interface ISectionChangeCallback {void accept(WorldSection section, int updateFlags, int neighborMsk);}
     public interface ISectionSaveCallback {boolean save(WorldEngine engine, WorldSection section, boolean nonBlocking, boolean sectionAlreadyAcquired);}
@@ -28,6 +29,7 @@ public final class WorldEngine {
 
     public final SectionStorage storage;
     private final Mapper mapper;
+    private final boolean ownsMapper;
     private final ActiveSectionTracker sectionTracker;
     private ISectionChangeCallback dirtyCallback;
     private ISectionSaveCallback saveCallback;
@@ -66,6 +68,10 @@ public final class WorldEngine {
     }
 
     public WorldEngine(SectionStorage storage, @Nullable VoxyInstance instance) {
+        this(storage, instance, null);
+    }
+
+    public WorldEngine(SectionStorage storage, @Nullable VoxyInstance instance, @Nullable Mapper sharedMapper) {
         this.instanceIn = instance;
 
         int cacheSize = 1024;
@@ -74,7 +80,8 @@ public final class WorldEngine {
         }
 
         this.storage = storage;
-        this.mapper = new Mapper(this.storage);
+        this.ownsMapper = sharedMapper == null;
+        this.mapper = this.ownsMapper ? new Mapper(storage) : sharedMapper;
         //5 cache size bits means that the section tracker has 32 separate maps that it uses
         this.sectionTracker = new ActiveSectionTracker(6, storage::loadSection, cacheSize, this);
     }
@@ -162,7 +169,9 @@ public final class WorldEngine {
         }
 
         this.thisTracker.free();
-        try {this.mapper.close();} catch (Exception e) {Logger.error(e);}
+        if (this.ownsMapper) {
+            try {this.mapper.close();} catch (Exception e) {Logger.error(e);}
+        }
         try {this.storage.flush();} catch (Exception e) {Logger.error(e);}
         //Shutdown in this order to preserve as much data as possible
         try {this.storage.close();} catch (Exception e) {Logger.error(e);}

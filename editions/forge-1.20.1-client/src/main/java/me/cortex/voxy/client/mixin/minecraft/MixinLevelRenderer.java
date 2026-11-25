@@ -9,6 +9,9 @@ import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
+import me.cortex.voxy.server.LocalLodTerrain;
+import me.cortex.voxy.server.ServerLodService;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
 import org.jetbrains.annotations.Nullable;
@@ -23,6 +26,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class MixinLevelRenderer implements IGetVoxyRenderSystem {
     @Shadow private @Nullable ClientLevel level;
     @Unique private VoxyRenderSystem renderer;
+    @Unique private LocalLodTerrain voxy$localTerrain;
 
     @Override
     public VoxyRenderSystem voxy$getRenderSystem() {
@@ -52,9 +56,15 @@ public abstract class MixinLevelRenderer implements IGetVoxyRenderSystem {
 
     @Override
     public void voxy$shutdownRenderer() {
-        if (this.renderer != null) {
-            this.renderer.shutdown();
+        if (this.voxy$localTerrain != null) this.voxy$localTerrain.stopUpdates();
+        try {
+            if (this.renderer != null) this.renderer.shutdown();
+        } finally {
             this.renderer = null;
+            if (this.voxy$localTerrain != null) {
+                this.voxy$localTerrain.close();
+                this.voxy$localTerrain = null;
+            }
         }
     }
 
@@ -78,19 +88,24 @@ public abstract class MixinLevelRenderer implements IGetVoxyRenderSystem {
             Logger.error("Not creating renderer due to null instance");
             return;
         }
-        WorldEngine world = WorldIdentifier.ofEngine(this.level);
+        var localTerrain = ServerLodService.openLocalTerrain(Minecraft.getInstance().getSingleplayerServer(),
+                this.level.dimension());
+        WorldEngine world = localTerrain == null ? WorldIdentifier.ofEngine(this.level) : localTerrain.world();
         if (world == null) {
             Logger.error("Null world selected");
             return;
         }
         try {
             this.renderer = new VoxyRenderSystem(world, instance.getServiceManager());
+            this.voxy$localTerrain = localTerrain;
         } catch (RuntimeException e) {
             if (IrisUtil.irisShaderPackEnabled()) {
                 IrisUtil.disableIrisShaders();
             } else {
                 throw e;
             }
+        } finally {
+            if (this.renderer == null && localTerrain != null) localTerrain.close();
         }
         instance.updateDedicatedThreads();
     }

@@ -5,6 +5,7 @@ import me.cortex.voxy.common.world.LodSectionSnapshot;
 import me.cortex.voxy.common.world.SurfaceDataCoverage;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
+import org.sqlite.SQLiteConfig;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -29,6 +30,17 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
     public record WireTile(TileVersion version, byte[] data) {}
 
     private final Connection db;
+
+    public static LodSectionStorage openReadOnly(Path path) throws SQLException {
+        var config = new SQLiteConfig();
+        config.setReadOnly(true);
+        return new LodSectionStorage(DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath(),
+                config.toProperties()));
+    }
+
+    private LodSectionStorage(Connection connection) {
+        this.db = connection;
+    }
 
     public LodSectionStorage(Path path) throws SQLException, ClassNotFoundException {
         Class.forName("org.sqlite.JDBC");

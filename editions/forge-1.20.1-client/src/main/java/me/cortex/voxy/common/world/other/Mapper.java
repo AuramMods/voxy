@@ -133,7 +133,13 @@ public class Mapper {
     }
 
     public void setBiomeCallback(Consumer<BiomeEntry> biomeCallback) {
-        this.newBiomeCallback = biomeCallback;
+        this.biomeLock.lock();
+        try {
+            this.newBiomeCallback = biomeCallback;
+            if (biomeCallback != null) this.biomeId2biomeEntry.forEach(biomeCallback);
+        } finally {
+            this.biomeLock.unlock();
+        }
     }
 
     private void loadFromStorage() {
@@ -244,12 +250,13 @@ public class Mapper {
         entry = new BiomeEntry(this.biomeId2biomeEntry.size(), biome);
         this.biomeId2biomeEntry.add(entry);
         this.biome2biomeEntry.put(biome, entry);
+        var callback = this.newBiomeCallback;
         this.biomeLock.unlock();
 
         this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
         //this.storage.flush();
 
-        if (this.newBiomeCallback!=null)this.newBiomeCallback.accept(entry);
+        if (callback != null) callback.accept(entry);
         return entry;
     }
 

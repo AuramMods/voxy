@@ -25,9 +25,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 final class ServerLodStreams {
-    private static final int PLAYER_BYTES_PER_SECOND = 512 * 1024;
-    private static final int PLAYER_BURST = PLAYER_BYTES_PER_SECOND + 4096;
-    private static final int SERVER_BYTES_PER_SECOND = 2 * 1024 * 1024;
     private static final int MAX_QUERY = LodChannel.MAX_OFFER;
     private static final int MAX_METADATA_LOOKUPS_PER_TICK = 12;
     private static final int MAX_PENDING_CHANGES = 512;
@@ -44,7 +41,7 @@ final class ServerLodStreams {
         final Set<Long> visibleDemand = new LinkedHashSet<>();
         final Set<Long> visibleSubscriptions = new HashSet<>();
         final ArrayDeque<Long> requests = new ArrayDeque<>();
-        long bytes = PLAYER_BURST;
+        final LodStreamBudget budget;
         long waitUntil;
         long batch;
         long nextDemand;
@@ -59,12 +56,13 @@ final class ServerLodStreams {
         CompletableFuture<ArrayDeque<LodChannel.Section>> sections;
         final ArrayDeque<LodChannel.Section> ready = new ArrayDeque<>();
 
-        Stream(ServerPlayer player, ServerLodService.Dimension dimension, long scope, int radius) {
+        Stream(ServerPlayer player, ServerLodService.Dimension dimension, long scope, int radius, int rateKiB) {
             this.player = player;
             this.level = player.serverLevel();
             this.dimension = dimension;
             this.scope = scope;
             this.radius = radius;
+            this.budget = new LodStreamBudget(rateKiB, 4096);
         }
     }
 
@@ -73,7 +71,7 @@ final class ServerLodStreams {
     private final Map<UUID, Stream> streams = new HashMap<>();
     private final java.util.concurrent.atomic.AtomicInteger tasks = new java.util.concurrent.atomic.AtomicInteger();
     private long nextScope;
-    private long budget = SERVER_BYTES_PER_SECOND;
+    private final LodStreamBudget budget = new LodStreamBudget(ServerVoxyConfig.SERVER_STREAM_RATE.get(), 0);
     private final UUID session = UUID.randomUUID();
 
     ServerLodStreams(ServerLodService service, Executor worker) {
@@ -82,23 +80,25 @@ final class ServerLodStreams {
     }
 
     void tick() {
-        this.budget = Math.min(SERVER_BYTES_PER_SECOND, this.budget + SERVER_BYTES_PER_SECOND / 20);
+        this.budget.tick(ServerVoxyConfig.SERVER_STREAM_RATE.get());
+        int playerRate = ServerVoxyConfig.PLAYER_STREAM_RATE.get();
         int lookups = 0;
         long now = System.nanoTime();
         var online = new HashSet<UUID>();
         for (var player : this.service.server().getPlayerList().getPlayers()) {
-            if (!LodChannel.available(player)) continue;
+            if (player.connection.connection.isMemoryConnection() || !LodChannel.available(player)) continue;
             online.add(player.getUUID());
             int radius = ServerVoxyConfig.RADIUS.get();
             var stream = this.streams.get(player.getUUID());
             if (stream == null || stream.player != player || stream.level != player.serverLevel() || stream.radius != radius) {
                 var dimension = this.service.dimension(player.serverLevel());
-                stream = new Stream(player, dimension, ++this.nextScope, radius);
+                stream = new Stream(player, dimension, ++this.nextScope, radius, playerRate);
                 this.streams.put(player.getUUID(), stream);
                 LodChannel.send(player, new LodChannel.Scope(this.service.worldId, this.session,
                         stream.level.dimension().location(), stream.scope, radius));
             }
             boolean mayQuery = lookups < MAX_METADATA_LOOKUPS_PER_TICK && this.tasks.get() < 32;
+            stream.budget.tick(playerRate);
             if (stream.clientReady && this.sendNext(player, stream, now, mayQuery)) lookups++;
         }
         this.streams.keySet().retainAll(online);
@@ -115,7 +115,6 @@ final class ServerLodStreams {
     }
 
     private boolean sendNext(ServerPlayer player, Stream stream, long now, boolean mayQuery) {
-        stream.bytes = Math.min(PLAYER_BURST, stream.bytes + PLAYER_BYTES_PER_SECOND / 20);
         var center = player.chunkPosition();
         stream.center = center;
         int step = Math.max(1, Math.min(8, stream.radius / 4));
@@ -134,11 +133,11 @@ final class ServerLodStreams {
         while (!stream.ready.isEmpty()) {
             var ready = stream.ready.peekFirst();
             if (LodSectionCursor.inWorldRange(ready.key(), center, stream.radius)) {
-                int bytes = ready.data().length + 40;
-                if (bytes > stream.bytes || bytes > this.budget) break;
+                int bytes = ready.data().length + LodStreamBudget.SECTION_OVERHEAD_BYTES;
+                if (!stream.budget.canSend(bytes) || !this.budget.canSend(bytes)) break;
                 LodChannel.send(player, ready);
-                stream.bytes -= bytes;
-                this.budget -= bytes;
+                stream.budget.sent(bytes);
+                this.budget.sent(bytes);
             }
             stream.ready.removeFirst();
         }
@@ -220,11 +219,11 @@ final class ServerLodStreams {
 
     private boolean sendOffer(ServerPlayer player, Stream stream, LodChannel.Offer offer, long now) {
         int bytes = offer.keys().length * 26 + 16;
-        if (bytes > stream.bytes || bytes > this.budget) return false;
+        if (!stream.budget.canSend(bytes) || !this.budget.canSend(bytes)) return false;
         stream.waitUntil = now + 3_000_000_000L;
         LodChannel.send(player, offer);
-        stream.bytes -= bytes;
-        this.budget -= bytes;
+        stream.budget.sent(bytes);
+        this.budget.sent(bytes);
         return true;
     }
 

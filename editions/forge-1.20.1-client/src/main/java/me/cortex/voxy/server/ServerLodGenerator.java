@@ -273,6 +273,7 @@ final class ServerLodGenerator {
             if (!job.write.isDone()) return false;
             var changed = job.write.join();
             if (changed != null) {
+                this.service.publishLocal(job.target.anchor.level(), changed);
                 if (job.generated) this.generated++;
                 else this.imported++;
             }
