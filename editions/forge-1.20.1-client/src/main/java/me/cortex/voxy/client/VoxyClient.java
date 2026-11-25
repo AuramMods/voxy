@@ -18,6 +18,16 @@ import java.util.function.Function;
 public abstract class VoxyClient {
     private static final HashSet<String> FREX = new HashSet<>();
     private static FileLock EXCLUSIVE_LOCK;
+    private static boolean blockAtlasAnimationsEnabled = true;
+
+    public static boolean blockAtlasAnimationsEnabled() {
+        return blockAtlasAnimationsEnabled;
+    }
+
+    public static void setBlockAtlasAnimationsEnabled(boolean enabled) {
+        blockAtlasAnimationsEnabled = enabled;
+    }
+
     public static void initVoxyClient() {
         Capabilities.init();//Ensure clinit is called
 

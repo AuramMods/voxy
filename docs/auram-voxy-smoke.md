@@ -56,4 +56,14 @@ The previous jar initialized Voxy's serializers while its mixin plugin was check
 
 The rebuilt jar entered the smoke world and started `IrisVoxyRenderPipeline` with `MDICSectionRenderer`. Both distant landmarks and the bridge rendered outside the five-chunk near distance on both the initial run and after a clean restart without another import. The local screenshots are in the full-pack profile at `evidence/02-full-auram-voxy.png` and `evidence/03-full-auram-voxy-restart.png`.
 
-Custom dimensions and performance in the full pack remain unverified. The staged shader changes are recorded in [AuramBliss changes for Voxy](aurambliss-voxy-changes.md).
+Custom dimensions and general gameplay performance in the full pack remain unverified. Shader changes are recorded in [AuramBliss changes for Voxy](aurambliss-voxy-changes.md).
+
+## Shader reload slowdown on GLA 1.0.1
+
+In the full Auram copy, Oculus reloaded AuramBliss three times from a fixed Overworld camera. With Dynamic FPS disabled for the measurement, the client went from 85 to 103 to 98 to 5 FPS. Shutting down Voxy's renderer left the client at 5 FPS. Voxy's tracked resources stayed at 29 buffers and five textures while its renderer was active, and the log recorded one allocation of the reused geometry buffer. The macOS render-thread sample showed texture uploads during Embeddium's terrain draws.
+
+Pausing only Minecraft's block atlas animation tick recovered the slowed client from about 4 FPS to 103. Resuming it brought the slowdown back. The Nether portal sprite reproduced the stall on its own. Pausing just the portal in the full atlas recovered about 33 FPS. A resource reload with two mip levels left the client slow.
+
+On GLA, run `/voxy blockAtlasAnimations false` to pause the block atlas for the current client session while testing shaders. Run `/voxy blockAtlasAnimations true` to resume it. Shader-driven motion and the separate particle and GUI atlases still update.
+
+The rebuilt full-pack client reached 62 FPS after launch and 6 FPS after four confirmed shader reloads. The pause command raised it to 75 FPS. Four more confirmed reloads left it at 72 FPS with the atlas paused. Resuming the atlas brought it back to 4 FPS in that session.

@@ -44,6 +44,7 @@
     "minecraft.MixinLevelRenderer",
     "minecraft.MixinMinecraft",
     "minecraft.MixinRenderSystem",
+    "minecraft.MixinTextureAtlas",
 //? if 1.21.1
     //"minecraft.MixinWindow",
 
