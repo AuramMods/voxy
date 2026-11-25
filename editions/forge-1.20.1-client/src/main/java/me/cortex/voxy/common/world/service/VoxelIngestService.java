@@ -1,6 +1,7 @@
 package me.cortex.voxy.common.world.service;
 
 import me.cortex.voxy.common.Logger;
+import me.cortex.voxy.common.config.section.LodSectionStorage;
 import me.cortex.voxy.common.thread.Service;
 import me.cortex.voxy.common.thread.ServiceManager;
 import me.cortex.voxy.common.voxelization.ILightingSupplier;
@@ -93,7 +94,7 @@ public class VoxelIngestService {
     }
 
     public boolean enqueueIngest(WorldEngine engine, LevelChunk chunk) {
-        if (!this.service.isLive()) {
+        if (!this.service.isLive() || engine.storage instanceof LodSectionStorage) {
             return false;
         }
         if (!engine.isLive()) {
@@ -208,6 +209,7 @@ public class VoxelIngestService {
     }
 
     private boolean rawIngest0(WorldEngine engine, LevelChunkSection section, int x, int y, int z, DataLayer bl, DataLayer sl) {
+        if (engine.storage instanceof LodSectionStorage) return false;
         engine.acquireRef();
         this.ingestQueue.add(new IngestSection(x, y, z, engine, section, bl, sl));
         try {

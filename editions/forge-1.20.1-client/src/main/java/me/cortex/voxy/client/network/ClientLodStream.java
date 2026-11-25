@@ -7,6 +7,7 @@ import me.cortex.voxy.common.network.LodChannel;
 import me.cortex.voxy.common.network.LodSectionCodec;
 import me.cortex.voxy.common.network.RegistryLodPalette;
 import me.cortex.voxy.common.world.LodSectionSnapshot;
+import me.cortex.voxy.common.world.SurfaceDataCoverage;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
@@ -105,7 +106,10 @@ public final class ClientLodStream {
         announced = scope;
         var minecraft = Minecraft.getInstance();
         var level = minecraft.level;
-        if (worker == null || level == null || !scope.dimension().equals(level.dimension().location())) return;
+        if (worker == null || level == null || !scope.dimension().equals(level.dimension().location())) {
+            context = null;
+            return;
+        }
         var vanilla = WorldIdentifier.of(level);
         if (vanilla == null) return;
         var remote = new WorldIdentifier(vanilla.key, vanilla.biomeSeed, vanilla.dimension, scope.world());
@@ -143,21 +147,30 @@ public final class ClientLodStream {
     private static void requestMissing(Context ready, LodChannel.Offer offer) {
         var keys = new long[offer.keys().length];
         int count = 0;
+        boolean available = false;
         for (int i = 0; i < keys.length; i++) {
+            if (context != ready) return;
             long key = offer.keys()[i];
             var tile = ready.storage.remoteTile(key);
-            if (tile == null || tile.revision() < offer.revisions()[i]) keys[count++] = key;
+            var version = offer.versions()[i];
+            if (version == null) {
+                if (tile != null && !ready.scope.session().equals(tile.session())) forget(ready, key);
+            } else {
+                available = true;
+                if (tile == null || tile.needs(ready.scope.session(), version)) keys[count++] = key;
+            }
         }
-        var request = new LodChannel.Request(offer.scope(), Arrays.copyOf(keys, count));
+        if (!available) return;
+        var request = new LodChannel.Request(offer.scope(), offer.batch(), Arrays.copyOf(keys, count));
         Minecraft.getInstance().execute(() -> {
             if (context == ready) LodChannel.request(request);
         });
     }
 
     private static void accept(Context ready, LodChannel.Section message) {
-        if (message.revision() < 1) return;
+        if (message.version() == null || message.version().revision() < 1) return;
         var existing = ready.storage.remoteTile(message.key());
-        if (existing != null && existing.revision() >= message.revision()) return;
+        if (existing != null && !existing.needs(ready.scope.session(), message.version())) return;
         var palette = new RegistryLodPalette(ready.world.getMapper(), ready.registries);
         LodSectionSnapshot snapshot;
         try {
@@ -175,7 +188,7 @@ public final class ClientLodStream {
         var target = ready.world.acquire(snapshot.key());
         try {
             synchronized (target) {
-                if (ready.storage.commitRemote(snapshot, message.revision(), children)) {
+                if (ready.storage.commitRemote(snapshot, ready.scope.session(), message.version(), children)) {
                     snapshot.copyInto(target);
                     notifyRenderer(ready.world, target);
                 }
@@ -184,21 +197,43 @@ public final class ClientLodStream {
             target.release();
         }
         if (level < WorldEngine.MAX_LOD_LAYER) {
-            long parent = WorldEngine.getWorldSectionId(level + 1, WorldEngine.getX(snapshot.key()) >> 1,
-                    WorldEngine.getY(snapshot.key()) >> 1, WorldEngine.getZ(snapshot.key()) >> 1);
-            refreshParent(ready, parent);
+            refreshParent(ready, parent(snapshot.key()));
         }
+    }
+
+    private static void forget(Context ready, long key) {
+        if (!ready.storage.forgetRemote(key, ready.scope.session())) return;
+        int level = WorldEngine.getLevel(key);
+        var target = ready.world.acquireIfExists(key);
+        if (target != null) {
+            try {
+                synchronized (target) {
+                    new LodSectionSnapshot(key, (byte) 0, SurfaceDataCoverage.legacy(level),
+                            new long[WorldSection.SECTION_VOLUME]).copyInto(target);
+                    notifyRenderer(ready.world, target);
+                }
+            } finally {
+                target.release(WorldSection.RELEASE_HINT_DONT_CACHE);
+            }
+        }
+        if (level < WorldEngine.MAX_LOD_LAYER) refreshParent(ready, parent(key));
+    }
+
+    private static long parent(long key) {
+        return WorldEngine.getWorldSectionId(WorldEngine.getLevel(key) + 1, WorldEngine.getX(key) >> 1,
+                WorldEngine.getY(key) >> 1, WorldEngine.getZ(key) >> 1);
     }
 
     private static void refreshParent(Context ready, long key) {
         var tile = ready.storage.remoteTile(key);
-        if (tile == null || !allChildrenReady(ready, key, tile.children())) return;
+        if (tile == null) return;
+        byte children = allChildrenReady(ready, key, tile.children()) ? tile.children() : 0;
         var section = ready.world.acquireIfExists(key);
         if (section == null) return;
         try {
             synchronized (section) {
-                if (section.getNonEmptyChildren() != tile.children()) {
-                    section._unsafeSetNonEmptyChildren(tile.children());
+                if (section.getNonEmptyChildren() != children) {
+                    section._unsafeSetNonEmptyChildren(children);
                     ready.storage.saveSection(section);
                     notifyRenderer(ready.world, section);
                 }

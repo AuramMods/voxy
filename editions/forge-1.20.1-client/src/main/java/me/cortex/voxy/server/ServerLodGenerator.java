@@ -51,7 +51,7 @@ final class ServerLodGenerator {
         final CompletableFuture<Lookup> lookup;
         final int attempts;
         ServerChunkTicket ticket;
-        CompletableFuture<Void> write;
+        CompletableFuture<long[]> write;
         boolean generated;
         boolean needsTicket;
 
@@ -82,6 +82,7 @@ final class ServerLodGenerator {
     private final Map<Column, Job> active = new LinkedHashMap<>();
     private final Map<Column, Retry> retries = new HashMap<>();
     private final Set<Anchor> finishedOffline = new HashSet<>();
+    private final Set<ServerLevel> unloaded = Collections.newSetFromMap(new java.util.WeakHashMap<>());
     private final Set<Column> examined = Collections.newSetFromMap(new LinkedHashMap<>() {
         @Override
         protected boolean removeEldestEntry(Map.Entry<Column, Boolean> eldest) {
@@ -127,7 +128,6 @@ final class ServerLodGenerator {
             }
         });
 
-        this.issueTickets(anchors);
         if (!this.cursors.keySet().equals(anchors)) {
             this.cursors.keySet().retainAll(anchors);
             for (var anchor : anchors) {
@@ -139,31 +139,50 @@ final class ServerLodGenerator {
         int limit = ServerVoxyConfig.CHUNK_JOBS.get();
         int[] visits = {128};
         for (int count = 0; count < limit && this.active.size() < limit; count++) {
-            var next = this.nextFresh(visits);
-            var retry = this.nextRetry(anchors, System.nanoTime());
-            if (retry != null && (next == null || PRIORITY.compare(retry, next) < 0)) {
-                var state = this.retries.remove(retry.column());
-                this.schedule(retry, state.attempts());
-            } else if (next != null && this.retries.size() < 2048) {
-                this.cursors.get(next.anchor()).advance();
-                this.examined.add(next.column());
-                this.schedule(next, 0);
-            } else {
-                break;
-            }
+            var next = this.nextCandidate(anchors, visits);
+            if (next == null) break;
+            this.scheduleNext(next);
         }
+        this.issueTickets(anchors, visits);
     }
 
-    private void issueTickets(Set<Anchor> anchors) {
-        if (!this.generationOn) return;
+    private Candidate nextCandidate(Set<Anchor> anchors, int[] visits) {
+        var next = this.retries.size() < 2048 ? this.nextFresh(visits) : null;
+        var retry = this.nextRetry(anchors, System.nanoTime());
+        return retry != null && (next == null || PRIORITY.compare(retry, next) < 0) ? retry : next;
+    }
+
+    private void scheduleNext(Candidate candidate) {
+        var retry = this.retries.remove(candidate.column());
+        if (retry == null) {
+            this.cursors.get(candidate.anchor()).advance();
+            this.examined.add(candidate.column());
+        }
+        this.schedule(candidate, retry == null ? 0 : retry.attempts());
+    }
+
+    private void issueTickets(Set<Anchor> anchors, int[] visits) {
+        if (!this.generationOn || visits[0] < 0) return;
         var ready = this.active.entrySet().stream()
                 .filter(entry -> entry.getValue().write == null && entry.getValue().ticket == null)
                 .map(entry -> priorityAt(anchors, entry.getKey()))
                 .filter(java.util.Objects::nonNull)
                 .sorted(PRIORITY)
                 .toList();
+        if (ready.isEmpty()) return;
+        var frontier = this.nextCandidate(anchors, visits);
+        if (visits[0] < 0) return;
         for (var candidate : ready) {
             Job job = this.active.get(candidate.column());
+            if (frontier != null && PRIORITY.compare(frontier, candidate) < 0) {
+                // A new anchor can expose closer work while all slots are occupied by saved-chunk lookups.
+                if (job.needsTicket) {
+                    this.active.remove(candidate.column());
+                    this.retries.put(candidate.column(), new Retry(0, job.attempts));
+                    this.scheduleNext(frontier);
+                }
+                break;
+            }
             // Resolve nearer candidates before issuing a ticket for a farther one.
             if (!job.needsTicket) break;
             var level = candidate.anchor().level();
@@ -251,9 +270,11 @@ final class ServerLodGenerator {
     private boolean advance(Job job, boolean eligible) {
         if (job.write != null) {
             if (!job.write.isDone()) return false;
-            job.write.join();
-            if (job.generated) this.generated++;
-            else this.imported++;
+            var changed = job.write.join();
+            if (changed != null) {
+                if (job.generated) this.generated++;
+                else this.imported++;
+            }
             return true;
         }
         if (!eligible) {
@@ -298,9 +319,13 @@ final class ServerLodGenerator {
     }
 
     private void write(Job job, ServerChunkSnapshot snapshot) {
-        job.write = CompletableFuture.runAsync(() -> {
+        var level = job.target.anchor().level();
+        long key = snapshot.position().toLong();
+        job.write = CompletableFuture.supplyAsync(() -> {
             synchronized (job.dimension) {
-                ServerColumnWriter.commit(job.dimension.world(), job.dimension.storage(), snapshot);
+                if (job.dimension.storage().hasColumn(key) || this.service.pendingEdit(level, key)) return null;
+                return ServerColumnWriter.commit(job.dimension.world(), job.dimension.storage(), snapshot,
+                        () -> !this.service.pendingEdit(level, key));
             }
         }, this.worker);
     }
@@ -314,6 +339,7 @@ final class ServerLodGenerator {
             var occupied = new HashSet<ResourceKey<Level>>();
             for (var player : players) {
                 var level = player.serverLevel();
+                if (this.unloaded.contains(level)) continue;
                 occupied.add(level.dimension());
                 anchors.add(new Anchor(level, player.chunkPosition(), radius));
             }
@@ -325,7 +351,7 @@ final class ServerLodGenerator {
             for (String configured : ServerVoxyConfig.SPAWN_DIMENSIONS.get()) {
                 var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(configured));
                 var level = server.getLevel(key);
-                if (level == null) continue;
+                if (level == null || this.unloaded.contains(level)) continue;
                 var anchor = spawnAnchor(level, radius);
                 if (this.finishedOffline.contains(anchor)) continue;
                 var cursor = this.cursors.get(anchor);
@@ -383,5 +409,10 @@ final class ServerLodGenerator {
 
     void close() {
         this.active.values().forEach(Job::releaseTicket);
+    }
+
+    void unload(ServerLevel level) {
+        this.unloaded.add(level);
+        this.active.values().stream().filter(job -> job.target.anchor().level() == level).forEach(Job::releaseTicket);
     }
 }

@@ -192,6 +192,11 @@ public class WorldIdentifier {
             writer.name("dimension");
             writer.value(identifier.dimension.location().toString());
 
+            if (identifier.serverWorld != null) {
+                writer.name("serverWorld");
+                writer.value(identifier.serverWorld.toString());
+            }
+
             writer.endObject();
         }
 
@@ -207,7 +212,8 @@ public class WorldIdentifier {
 
             var key = ResourceKey.create(Registries.DIMENSION, ResourceLocation.tryParse(sKey));
             var dim = ResourceKey.create(Registries.DIMENSION_TYPE, ResourceLocation.tryParse(sDim));
-            return new WorldIdentifier(key, biomeSeed, dim);
+            var remote = obj.getAsJsonPrimitive("serverWorld");
+            return new WorldIdentifier(key, biomeSeed, dim, remote == null ? null : UUID.fromString(remote.getAsString()));
         }
     }
 }

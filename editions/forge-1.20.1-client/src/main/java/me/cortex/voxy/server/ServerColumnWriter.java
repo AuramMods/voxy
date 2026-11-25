@@ -6,11 +6,14 @@ import me.cortex.voxy.common.world.LodSectionSnapshot;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 
+import java.util.function.BooleanSupplier;
+
 /** Called by the dimension's storage worker with exclusive ownership of its WorldEngine. */
 final class ServerColumnWriter {
     private ServerColumnWriter() {}
 
-    static void commit(WorldEngine world, LodSectionStorage storage, ServerChunkSnapshot chunk) {
+    static long[] commit(WorldEngine world, LodSectionStorage storage, ServerChunkSnapshot chunk,
+            BooleanSupplier stillCurrent) {
         var changed = new Long2ObjectOpenHashMap<WorldSection>();
         world.setDirtyCallback((section, flags, neighbors) -> {
             if (changed.putIfAbsent(section.key, section) == null) section.acquire();
@@ -19,8 +22,10 @@ final class ServerColumnWriter {
         try {
             chunk.insertInto(world);
             var snapshots = changed.values().stream().map(LodSectionSnapshot::capture).toList();
+            if (!stillCurrent.getAsBoolean()) return null;
             storage.commitColumn(chunk.position().toLong(), snapshots);
             committed = true;
+            return changed.keySet().toLongArray();
         } finally {
             world.setDirtyCallback(null);
             for (var section : changed.values()) {

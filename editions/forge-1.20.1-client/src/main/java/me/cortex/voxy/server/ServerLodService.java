@@ -4,13 +4,18 @@ import me.cortex.voxy.common.config.section.LodSectionStorage;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.network.LodChannel;
 import me.cortex.voxy.common.world.WorldEngine;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.level.ChunkEvent;
+import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -31,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 public final class ServerLodService implements AutoCloseable {
     record Dimension(WorldEngine world, LodSectionStorage storage) {}
 
-    private static ServerLodService current;
+    private static volatile ServerLodService current;
 
     private final MinecraftServer server;
     private final Path root;
@@ -39,6 +44,7 @@ public final class ServerLodService implements AutoCloseable {
     private final Map<ResourceKey<Level>, Dimension> worlds = new HashMap<>();
     private final ExecutorService worker;
     private final ServerLodGenerator generator;
+    private final ServerLodEdits edits;
     private final ServerLodStreams streams;
     private long lastReport = System.nanoTime();
 
@@ -54,6 +60,7 @@ public final class ServerLodService implements AutoCloseable {
             return thread;
         });
         this.generator = new ServerLodGenerator(this, this.worker);
+        this.edits = new ServerLodEdits(this, this.worker);
         this.streams = new ServerLodStreams(this, this.worker);
     }
 
@@ -80,7 +87,45 @@ public final class ServerLodService implements AutoCloseable {
     }
 
     static ServerLodService forServer(MinecraftServer server) {
-        return current != null && current.server == server ? current : null;
+        var service = current;
+        return service != null && service.server == server ? service : null;
+    }
+
+    public static void blockChanged(ServerLevel level, BlockPos position) {
+        var service = forServer(level.getServer());
+        if (service != null && level.getServer().isSameThread()) {
+            service.edits.blockChanged(level, new ChunkPos(position));
+        }
+    }
+
+    public static void lightChanged(ServerLevel level, long position) {
+        var service = forServer(level.getServer());
+        if (service != null) service.edits.lightChanged(level, position);
+    }
+
+    boolean pendingEdit(ServerLevel level, long position) {
+        return this.edits.isPending(level, position);
+    }
+
+    void publish(ServerLevel level, long[] changed) {
+        this.streams.publish(level, changed);
+    }
+
+    @SubscribeEvent
+    public static void onChunkUnload(ChunkEvent.Unload event) {
+        if (event.getLevel() instanceof ServerLevel level && event.getChunk() instanceof LevelChunk chunk
+                && level.getServer().isSameThread()) {
+            var service = forServer(level.getServer());
+            if (service != null) service.edits.unloading(level, chunk);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onLevelUnload(LevelEvent.Unload event) {
+        if (event.getLevel() instanceof ServerLevel level) {
+            var service = forServer(level.getServer());
+            if (service != null) service.generator.unload(level);
+        }
     }
 
     @SubscribeEvent
@@ -102,6 +147,7 @@ public final class ServerLodService implements AutoCloseable {
     public static void onTick(TickEvent.ServerTickEvent event) {
         var service = forServer(event.getServer());
         if (service == null || event.phase != TickEvent.Phase.END) return;
+        service.edits.tick(event.getServer().getTickCount());
         service.generator.tick();
         service.streams.tick();
         long now = System.nanoTime();
@@ -129,6 +175,7 @@ public final class ServerLodService implements AutoCloseable {
     @Override
     public void close() {
         this.generator.close();
+        this.edits.flush(this.server.getTickCount());
         this.worker.shutdown();
         try {
             if (!this.worker.awaitTermination(10, TimeUnit.SECONDS)) {

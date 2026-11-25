@@ -1,5 +1,6 @@
 package me.cortex.voxy.common.network;
 
+import me.cortex.voxy.common.config.section.LodSectionStorage.TileVersion;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -18,16 +19,17 @@ import java.util.function.Supplier;
 
 public final class LodChannel {
     public static final int MAX_OFFER = 64;
-    private static final String VERSION = "1";
+    private static final String VERSION = "2";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("voxy", "lod"), () -> VERSION,
             NetworkRegistry.acceptMissingOr(VERSION), NetworkRegistry.acceptMissingOr(VERSION));
 
     public sealed interface ClientMessage permits Scope, Offer, Section {}
-    public record Scope(UUID world, ResourceLocation dimension, long scope, int radiusChunks) implements ClientMessage {}
-    public record Offer(long scope, long[] keys, long[] revisions) implements ClientMessage {}
-    public record Request(long scope, long[] keys) {}
-    public record Section(long scope, long key, long revision, byte[] data) implements ClientMessage {}
+    public record Scope(UUID world, UUID session, ResourceLocation dimension, long scope, int radiusChunks)
+            implements ClientMessage {}
+    public record Offer(long scope, long batch, long[] keys, TileVersion[] versions) implements ClientMessage {}
+    public record Request(long scope, long batch, long[] keys) {}
+    public record Section(long scope, long key, TileVersion version, byte[] data) implements ClientMessage {}
 
     private static Consumer<ClientMessage> client = message -> {};
     private static BiConsumer<ServerPlayer, Request> server = (player, request) -> {};
@@ -37,45 +39,60 @@ public final class LodChannel {
     public static void register() {
         registerClient(0, Scope.class, (message, out) -> {
             out.writeUUID(message.world());
+            out.writeUUID(message.session());
             out.writeResourceLocation(message.dimension());
             out.writeLong(message.scope());
             out.writeVarInt(message.radiusChunks());
-        }, in -> new Scope(in.readUUID(), in.readResourceLocation(), in.readLong(), in.readVarInt()));
+        }, in -> new Scope(in.readUUID(), in.readUUID(), in.readResourceLocation(), in.readLong(), in.readVarInt()));
         registerClient(1, Offer.class, (message, out) -> {
             out.writeLong(message.scope());
+            out.writeVarLong(message.batch());
             out.writeVarInt(message.keys().length);
             for (int i = 0; i < message.keys().length; i++) {
                 out.writeLong(message.keys()[i]);
-                out.writeVarLong(message.revisions()[i]);
+                writeVersion(out, message.versions()[i]);
             }
         }, in -> {
             long scope = in.readLong();
+            long batch = in.readVarLong();
             int count = readCount(in);
             var keys = new long[count];
-            var revisions = new long[count];
+            var versions = new TileVersion[count];
             for (int i = 0; i < count; i++) {
                 keys[i] = in.readLong();
-                revisions[i] = in.readVarLong();
+                versions[i] = readVersion(in);
             }
-            return new Offer(scope, keys, revisions);
+            return new Offer(scope, batch, keys, versions);
         });
         CHANNEL.registerMessage(2, Request.class, (message, out) -> {
             out.writeLong(message.scope());
+            out.writeVarLong(message.batch());
             out.writeVarInt(message.keys().length);
             for (long key : message.keys()) out.writeLong(key);
         }, in -> {
             long scope = in.readLong();
+            long batch = in.readVarLong();
             var keys = new long[readCount(in)];
             for (int i = 0; i < keys.length; i++) keys[i] = in.readLong();
-            return new Request(scope, keys);
+            return new Request(scope, batch, keys);
         }, LodChannel::handleRequest, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         registerClient(3, Section.class, (message, out) -> {
             out.writeLong(message.scope());
             out.writeLong(message.key());
-            out.writeVarLong(message.revision());
+            writeVersion(out, message.version());
             out.writeByteArray(message.data());
-        }, in -> new Section(in.readLong(), in.readLong(), in.readVarLong(),
+        }, in -> new Section(in.readLong(), in.readLong(), readVersion(in),
                 in.readByteArray(LodSectionCodec.MAX_COMPRESSED_BYTES)));
+    }
+
+    private static void writeVersion(FriendlyByteBuf out, TileVersion version) {
+        out.writeVarLong(version == null ? 0 : version.revision());
+        if (version != null) out.writeLong(version.content());
+    }
+
+    private static TileVersion readVersion(FriendlyByteBuf in) {
+        long revision = in.readVarLong();
+        return revision == 0 ? null : new TileVersion(revision, in.readLong());
     }
 
     private static int readCount(FriendlyByteBuf in) {

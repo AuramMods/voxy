@@ -1,6 +1,8 @@
 package me.cortex.voxy.server;
 
 import me.cortex.voxy.common.config.section.LodSectionStorage;
+import me.cortex.voxy.common.config.section.LodSectionStorage.TileVersion;
+import me.cortex.voxy.common.config.section.LodSectionStorage.WireTile;
 import me.cortex.voxy.common.world.LodSectionSnapshot;
 import me.cortex.voxy.common.world.SurfaceDataCoverage;
 import me.cortex.voxy.common.world.WorldEngine;
@@ -12,6 +14,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -51,14 +54,43 @@ class ServerSectionStorageTest {
         var key = WorldEngine.getWorldSectionId(0, 7, 0, -8);
         var snapshot = new LodSectionSnapshot(key, (byte) 0, SurfaceDataCoverage.raw(0),
                 new long[WorldSection.SECTION_VOLUME]);
+        var session = UUID.randomUUID();
         try (var store = new LodSectionStorage(path)) {
-            assertTrue(store.commitRemote(snapshot, 13, (byte) 0));
+            assertTrue(store.commitRemote(snapshot, session, new TileVersion(13, 19), (byte) 0));
             snapshot.voxels()[0] = 1;
-            assertFalse(store.commitRemote(snapshot, 12, (byte) 1));
+            assertFalse(store.commitRemote(snapshot, session, new TileVersion(12, 20), (byte) 1));
         }
         try (var store = new LodSectionStorage(path)) {
-            assertEquals(13, store.remoteTile(key).revision());
+            assertEquals(13, store.remoteTile(key).version().revision());
             assertEquals(0, store.read(key).section().voxels()[0]);
+            var nextSession = UUID.randomUUID();
+            assertFalse(store.commitRemote(snapshot, nextSession, new TileVersion(13, 19), (byte) 0));
+            assertTrue(store.commitRemote(snapshot, nextSession, new TileVersion(7, 20), (byte) 0));
+            assertEquals(1, store.read(key).section().voxels()[0]);
+            assertFalse(store.commitRemote(snapshot, nextSession, new TileVersion(6, 21), (byte) 0));
+            assertFalse(store.forgetRemote(key, nextSession));
+            assertTrue(store.forgetRemote(key, UUID.randomUUID()));
+            assertNull(store.read(key));
+            assertNull(store.remoteTile(key));
+        }
+    }
+
+    @Test
+    void refusesToServeWireDataForAnOlderStorageRevision(@TempDir Path temp) throws Exception {
+        var key = WorldEngine.getWorldSectionId(0, 7, 0, -8);
+        var snapshot = new LodSectionSnapshot(key, (byte) 0, SurfaceDataCoverage.raw(0),
+                new long[WorldSection.SECTION_VOLUME]);
+        byte[] encoded = {1, 2, 3};
+        var first = new WireTile(new TileVersion(1, 42), encoded);
+        try (var store = new LodSectionStorage(temp.resolve("lod.sqlite"))) {
+            store.commitColumn(0, List.of(snapshot));
+            assertTrue(store.cacheWireTile(key, first));
+            assertArrayEquals(encoded, store.wireTile(key).data());
+            assertEquals(first.version(), store.wireVersion(key));
+            store.commitColumn(0, List.of(snapshot));
+            assertNull(store.wireTile(key));
+            assertNull(store.wireVersion(key));
+            assertFalse(store.cacheWireTile(key, first));
         }
     }
 }

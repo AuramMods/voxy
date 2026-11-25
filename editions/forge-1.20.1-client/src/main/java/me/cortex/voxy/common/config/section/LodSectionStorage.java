@@ -17,6 +17,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Collection;
+import java.util.UUID;
 import java.util.function.LongConsumer;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
@@ -24,6 +25,8 @@ import java.util.zip.InflaterInputStream;
 /** One dimension's headless section store. Column coverage and its revised LODs commit together. */
 public final class LodSectionStorage extends SectionStorage implements AutoCloseable {
     public record Revision(long number, LodSectionSnapshot section) {}
+    public record TileVersion(long revision, long content) {}
+    public record WireTile(TileVersion version, byte[] data) {}
 
     private final Connection db;
 
@@ -45,10 +48,28 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
             statement.execute("CREATE INDEX IF NOT EXISTS section_v1_level ON section_v1(level)");
             statement.execute("CREATE TABLE IF NOT EXISTS completed_columns (id INTEGER PRIMARY KEY)");
             statement.execute("""
-                    CREATE TABLE IF NOT EXISTS remote_tiles (
-                        id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, children INTEGER NOT NULL
+                    CREATE TABLE IF NOT EXISTS remote_versions (
+                        id INTEGER PRIMARY KEY, session TEXT NOT NULL, revision INTEGER NOT NULL,
+                        content INTEGER NOT NULL, children INTEGER NOT NULL
                     )
                     """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS wire_tiles_v1 (
+                        id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, content INTEGER NOT NULL,
+                        data BLOB NOT NULL
+                    )
+                    """);
+            boolean legacyCache;
+            try (var result = statement.executeQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name='remote_tiles'")) {
+                legacyCache = result.next();
+            }
+            if (legacyCache) {
+                statement.executeUpdate("""
+                        INSERT OR IGNORE INTO remote_versions(id, session, revision, content, children)
+                            SELECT cached.id, '00000000-0000-0000-0000-000000000000', cached.revision, 0,
+                                cached.children FROM remote_tiles cached JOIN section_v1 section ON cached.id=section.id
+                        """);
+            }
         } catch (SQLException ex) {
             try {
                 connection.close();
@@ -71,30 +92,108 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
         }
     }
 
-    public record RemoteTile(long revision, byte children) {}
+    public record RemoteTile(UUID session, TileVersion version, byte children) {
+        public boolean needs(UUID session, TileVersion offered) {
+            if (session.equals(this.session)) return offered.revision() > this.version.revision();
+            return offered.content() != this.version.content();
+        }
+    }
 
     public synchronized RemoteTile remoteTile(long key) {
-        try (var query = this.db.prepareStatement("SELECT revision, children FROM remote_tiles WHERE id=?")) {
+        try (var query = this.db.prepareStatement("SELECT session, revision, content, children FROM remote_versions WHERE id=?")) {
             query.setLong(1, key);
             try (var result = query.executeQuery()) {
-                return result.next() ? new RemoteTile(result.getLong(1), result.getByte(2)) : null;
+                return result.next() ? new RemoteTile(UUID.fromString(result.getString(1)),
+                        new TileVersion(result.getLong(2), result.getLong(3)), result.getByte(4)) : null;
             }
         } catch (SQLException ex) {
             throw storageFailure(ex);
         }
     }
 
-    public boolean commitRemote(LodSectionSnapshot section, long revision, byte children) {
+    public boolean commitRemote(LodSectionSnapshot section, UUID session, TileVersion version, byte children) {
         try {
             var bytes = encode(section);
             synchronized (this) {
                 var current = this.remoteTile(section.key());
-                if (current != null && current.revision() >= revision) return false;
+                if (current != null && !current.needs(session, version)) return false;
                 this.writeTransaction(null, java.util.List.of(section), new byte[][]{bytes},
-                        new RemoteTile(revision, children));
+                        new RemoteTile(session, version, children));
                 return true;
             }
         } catch (SQLException | IOException ex) {
+            throw storageFailure(ex);
+        }
+    }
+
+    public synchronized boolean forgetRemote(long key, UUID session) {
+        var current = this.remoteTile(key);
+        if (current == null || session.equals(current.session())) return false;
+        try (var data = this.db.prepareStatement("DELETE FROM section_v1 WHERE id=?");
+             var version = this.db.prepareStatement("DELETE FROM remote_versions WHERE id=?")) {
+            this.db.setAutoCommit(false);
+            try {
+                data.setLong(1, key);
+                data.executeUpdate();
+                version.setLong(1, key);
+                version.executeUpdate();
+                this.db.commit();
+                return true;
+            } catch (SQLException failure) {
+                try {
+                    this.db.rollback();
+                } catch (SQLException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+                throw failure;
+            } finally {
+                this.db.setAutoCommit(true);
+            }
+        } catch (SQLException failure) {
+            throw storageFailure(failure);
+        }
+    }
+
+    public synchronized TileVersion wireVersion(long key) {
+        try (var query = this.db.prepareStatement("""
+                SELECT wire.revision, wire.content FROM wire_tiles_v1 wire JOIN section_v1 section
+                    ON wire.id=section.id AND wire.revision=section.revision WHERE wire.id=?
+                """)) {
+            query.setLong(1, key);
+            try (var result = query.executeQuery()) {
+                return result.next() ? new TileVersion(result.getLong(1), result.getLong(2)) : null;
+            }
+        } catch (SQLException ex) {
+            throw storageFailure(ex);
+        }
+    }
+
+    public synchronized WireTile wireTile(long key) {
+        try (var query = this.db.prepareStatement("""
+                SELECT wire.revision, wire.content, wire.data FROM wire_tiles_v1 wire JOIN section_v1 section
+                    ON wire.id=section.id AND wire.revision=section.revision WHERE wire.id=?
+                """)) {
+            query.setLong(1, key);
+            try (var result = query.executeQuery()) {
+                return result.next() ? new WireTile(new TileVersion(result.getLong(1), result.getLong(2)),
+                        result.getBytes(3)) : null;
+            }
+        } catch (SQLException ex) {
+            throw storageFailure(ex);
+        }
+    }
+
+    public synchronized boolean cacheWireTile(long key, WireTile tile) {
+        try (var query = this.db.prepareStatement("""
+                INSERT OR REPLACE INTO wire_tiles_v1(id, revision, content, data)
+                    SELECT id, revision, ?, ? FROM section_v1 WHERE id=? AND revision=?
+                """)) {
+            query.setLong(1, tile.version().content());
+            query.setBytes(2, tile.data());
+            query.setLong(3, key);
+            query.setLong(4, tile.version().revision());
+            return query.executeUpdate() != 0;
+        } catch (SQLException ex) {
             throw storageFailure(ex);
         }
     }
@@ -184,10 +283,12 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
                 }
             }
             if (remote != null) {
-                try (var put = this.db.prepareStatement("INSERT OR REPLACE INTO remote_tiles VALUES(?, ?, ?)")) {
+                try (var put = this.db.prepareStatement("INSERT OR REPLACE INTO remote_versions VALUES(?, ?, ?, ?, ?)")) {
                     put.setLong(1, sections.iterator().next().key());
-                    put.setLong(2, remote.revision());
-                    put.setByte(3, remote.children());
+                    put.setString(2, remote.session().toString());
+                    put.setLong(3, remote.version().revision());
+                    put.setLong(4, remote.version().content());
+                    put.setByte(5, remote.children());
                     put.executeUpdate();
                 }
             }
