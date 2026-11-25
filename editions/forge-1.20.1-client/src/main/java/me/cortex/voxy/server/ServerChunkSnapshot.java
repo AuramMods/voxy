@@ -8,6 +8,7 @@ import me.cortex.voxy.common.voxelization.WorldVoxilizedSectionMipper;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldUpdater;
 import net.minecraft.core.Holder;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
@@ -15,6 +16,8 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.Block;
@@ -22,6 +25,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
 
@@ -35,6 +39,45 @@ record ServerChunkSnapshot(ChunkPos position, int minSection, Section[] sections
 
     record Section(PalettedContainer<BlockState> blocks, PalettedContainerRO<Holder<Biome>> biomes,
                    ILightingSupplier light) {}
+
+    static ServerChunkSnapshot fromLive(ServerLevel level, LevelChunk chunk) {
+        var position = chunk.getPos();
+        var minSection = level.getMinSection();
+        var source = chunk.getSections();
+        var sections = new Section[source.length];
+        boolean hasSky = level.dimensionType().hasSkyLight();
+        int[] heights = hasSky ? new int[256] : null;
+        if (heights != null) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) heights[x | z << 4] = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) + 1;
+            }
+        }
+        var engine = level.getLightEngine();
+        for (int index = 0; index < source.length; index++) {
+            var original = source[index];
+            int y = minSection + index;
+            var location = SectionPos.of(position, y);
+            var block = engine.getLayerListener(LightLayer.BLOCK).getDataLayerData(location);
+            var sky = hasSky ? engine.getLayerListener(LightLayer.SKY).getDataLayerData(location) : null;
+            sections[index] = new Section(original.getStates().copy(), copyBiomes(level, original.getBiomes()),
+                    lightSampler(block == null ? null : block.copy(), sky == null ? null : sky.copy(), heights, y << 4));
+        }
+        return new ServerChunkSnapshot(position, minSection, sections);
+    }
+
+    private static PalettedContainerRO<Holder<Biome>> copyBiomes(ServerLevel level,
+            PalettedContainerRO<Holder<Biome>> biomes) {
+        if (biomes instanceof PalettedContainer<Holder<Biome>> palette) return palette.copy();
+        var registry = level.registryAccess().registryOrThrow(Registries.BIOME);
+        var copy = new PalettedContainer<>(registry.asHolderIdMap(), registry.getHolderOrThrow(Biomes.PLAINS),
+                PalettedContainer.Strategy.SECTION_BIOMES);
+        for (int y = 0; y < 4; y++) {
+            for (int z = 0; z < 4; z++) {
+                for (int x = 0; x < 4; x++) copy.set(x, y, z, biomes.get(x, y, z));
+            }
+        }
+        return copy;
+    }
 
     static Optional<ServerChunkSnapshot> fromSaved(ServerLevel level, ChunkPos position, CompoundTag chunk) {
         if (ChunkStatus.byName(chunk.getString("Status")) != ChunkStatus.FULL) return Optional.empty();
@@ -71,14 +114,18 @@ record ServerChunkSnapshot(ChunkPos position, int minSection, Section[] sections
             DataLayer blockLight = lightLayer(section, "BlockLight");
             DataLayer skyLight = lightLayer(section, "SkyLight");
             int baseY = (minSection + index) << 4;
-            sections[index] = new Section(blocks, biomes, (x, y, z) -> {
-                int block = blockLight == null ? 0 : blockLight.get(x, y, z);
-                int sky = skyLight != null ? skyLight.get(x, y, z)
-                        : heights != null && baseY + y >= heights[x | z << 4] ? 15 : 0;
-                return (byte) (sky | block << 4);
-            });
+            sections[index] = new Section(blocks, biomes, lightSampler(blockLight, skyLight, heights, baseY));
         }
         return Optional.of(new ServerChunkSnapshot(position, minSection, sections));
+    }
+
+    private static ILightingSupplier lightSampler(DataLayer blockLight, DataLayer skyLight, int[] heights, int baseY) {
+        return (x, y, z) -> {
+            int block = blockLight == null ? 0 : blockLight.get(x, y, z);
+            int sky = skyLight != null ? skyLight.get(x, y, z)
+                    : heights != null && baseY + y >= heights[x | z << 4] ? 15 : 0;
+            return (byte) (sky | block << 4);
+        };
     }
 
     private static DataLayer lightLayer(CompoundTag section, String tag) {

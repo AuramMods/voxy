@@ -38,7 +38,7 @@ public final class ServerLodService implements AutoCloseable {
     final UUID worldId;
     private final Map<ResourceKey<Level>, Dimension> worlds = new HashMap<>();
     private final ExecutorService worker;
-    private final ServerLodBackfill backfill;
+    private final ServerLodGenerator generator;
     private final ServerLodStreams streams;
     private long lastReport = System.nanoTime();
 
@@ -53,7 +53,7 @@ public final class ServerLodService implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         });
-        this.backfill = new ServerLodBackfill(this, this.worker);
+        this.generator = new ServerLodGenerator(this, this.worker);
         this.streams = new ServerLodStreams(this, this.worker);
     }
 
@@ -102,14 +102,17 @@ public final class ServerLodService implements AutoCloseable {
     public static void onTick(TickEvent.ServerTickEvent event) {
         var service = forServer(event.getServer());
         if (service == null || event.phase != TickEvent.Phase.END) return;
-        service.backfill.tick();
+        service.generator.tick();
         service.streams.tick();
         long now = System.nanoTime();
         long elapsed = now - service.lastReport;
         if (elapsed >= TimeUnit.SECONDS.toNanos(60)) {
-            int imported = service.backfill.drainImports();
-            Logger.info("Voxy saved chunk conversion: " + imported + " columns in "
-                    + TimeUnit.NANOSECONDS.toSeconds(elapsed) + " seconds");
+            var progress = service.generator.report();
+            double perSecond = (progress.generated() + progress.imported()) * 1_000_000_000.0 / elapsed;
+            Logger.info(String.format(java.util.Locale.ROOT,
+                    "Voxy LODs %.2f chunks/s (%d generated, %d reused), generating %s, %d active tickets",
+                    perSecond, progress.generated(), progress.imported(),
+                    progress.generating().isEmpty() ? "idle" : progress.generating(), progress.tickets()));
             service.lastReport = now;
         }
     }
@@ -125,6 +128,7 @@ public final class ServerLodService implements AutoCloseable {
 
     @Override
     public void close() {
+        this.generator.close();
         this.worker.shutdown();
         try {
             if (!this.worker.awaitTermination(10, TimeUnit.SECONDS)) {

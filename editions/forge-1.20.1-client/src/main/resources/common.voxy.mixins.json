@@ -9,7 +9,8 @@
   },
   "mixins": [
     "minecraft.MixinWorld",
-    "minecraft.AccessorChunkMap"
+    "minecraft.AccessorChunkMap",
+    "minecraft.AccessorServerChunkCache"
   ],
   "overwrites": {
     "requireAnnotations": true
