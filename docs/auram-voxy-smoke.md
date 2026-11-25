@@ -2,7 +2,7 @@
 
 ## Test profile
 
-Use a separate Prism instance with Minecraft 1.20.1, Forge 47.4.10, and ARM64 Java 17. The original Auram instance supplies the Embeddium 0.3.31 and Oculus 1.8.0 jars and the original AuramBliss presets. The shader source is checked in under `shaderpacks/AuramBliss/`.
+Use a separate Prism instance with Minecraft 1.20.1, Forge 47.4.10, and ARM64 Java 17. The Auram instance supplies the Embeddium 0.3.31 and Oculus 1.8.0 jars, the shader pack, and its preset. [AuramBliss source in Auram](https://github.com/AuramMods/Auram/tree/main/minecraft/shaderpacks/AuramBliss).
 
 | Mod | Purpose |
 | --- | --- |
@@ -16,7 +16,7 @@ Set Minecraft's master volume to zero and disable pause on loss of focus for bac
 ## Reproduce the client
 
 1. Create an isolated Prism profile named **Auram Voxy Test**. Add Forge 47.4.10, select an ARM64 Java 17 runtime, and add the mods from the table.
-2. Copy the Forge client jar from the edition's `build/libs/` into the profile's `minecraft/mods/`. Copy the checked-in `shaderpacks/AuramBliss/` directory into the profile's `minecraft/shaderpacks/`. Copy the source instance's `AuramBliss.txt` preset alongside it and select AuramBliss in Oculus. The Mac smoke run used `TAA_UPSCALING=true` and `SCALE_FACTOR=0.80`.
+2. Copy the Forge client jar from the edition's `build/libs/` into the profile's `minecraft/mods/`. Copy `AuramBliss/` and `AuramBliss.txt` from the Auram instance's `minecraft/shaderpacks/` into the same directory in the test profile. Select AuramBliss in Oculus. The Mac smoke run used `TAA_UPSCALING=true` and `SCALE_FACTOR=0.80`.
 3. For a terrain control, select six chunks of near render distance and disable shaders. In a disposable world with generated terrain beyond that radius, run `/voxy import current` and check for distant terrain. Close and reopen the client and check the same area without another import.
 4. Enable AuramBliss and check the same view. In-game shader reload should recreate the Voxy pipeline and keep the LoDs on screen. For the prepared **Voxy Smoke** world, the pond begins at Z 162, the white bridge continues to Z 194, and the candle fixture is just south of spawn. A Nether round trip exercises the dimension-specific patches.
 

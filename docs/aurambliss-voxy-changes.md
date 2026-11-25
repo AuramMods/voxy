@@ -1,5 +1,7 @@
 # AuramBliss changes for Voxy
 
+Make shader edits in the Auram repository. [AuramBliss source in Auram](https://github.com/AuramMods/Auram/tree/main/minecraft/shaderpacks/AuramBliss).
+
 The original pack is recorded in commit `2ad07db5`. The version-1 Voxy integration uses [Bliss Unstable at `5609760`](https://github.com/X0nk/Bliss-Shader/tree/5609760a2083af89fbad18f1a1e85cc93a1fa4b3) as its reference.
 
 | Shader file or pass | Change |
