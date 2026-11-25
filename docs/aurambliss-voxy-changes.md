@@ -98,3 +98,11 @@ The cloud upscaler compares the first visible surface in both renderers. It reje
 The first composite uses Bliss's existing shadow-map blocker search on Voxy pixels with scattering materials, such as leaves and grass. It runs only when the extra samples fit inside the shadow map and stores the measurements separately from ordinary shadow filtering. The lighting pass blends Bliss's near sunlight scattering into the existing LoD lighting. The effect uses horizontal distance and is strongest through the first extra chunk, then fades over the second. At three chunks of near render distance, the fade runs from 64 to 80 blocks.
 
 The macOS smoke client reloaded the shader in Oculus at three chunks. A temporary diagnostic on adjacent oak-leaf and stone strips showed full weight, a smooth fade, and zero weight on the distant leaves. The stone strip received no scattering. The regular shader was restored for the final reload. Existing Voxy builds that export `vxNearRenderDistance` can load the change directly.
+
+## Flickering contact shadows on Voxy terrain
+
+Bliss's screen-space contact trace moved its start each frame and marked a pixel fully shadowed after a single qualifying depth hit. On Voxy terrain, the trace now starts from the same pixel each frame and grades each hit by its separation in view-space blocks. The contribution fades at depth breaks and at the end of the trace. The ray stops at the active viewport edge. The short contact trace still contributes to sunlight scattering. The shadow map and the near terrain contact trace keep their existing sampling.
+
+Use `python3 tools/frame_luma_diff.py before.png after.png diff.png --crop 890 215 1740 550` from the repository root to compare a stationary camera's screenshots. The crop covers the spruce canopy in the original Auram captures. Orange shows brightening and blue shows darkening. The script uses Pillow and NumPy.
+
+In the three-chunk macOS smoke client with 80% TAA upscaling, the 99th-percentile change in the spruce contact-shadow diagnostic fell from 13 to 6 display levels. The diagnostic isolates the contact trace from ambient occlusion and shadow-map variation. In the regular shader, the mean frame-to-frame luma change in the same crop fell from 2.9 to 2.7 levels out of 255. The final shader reloaded and rendered with the existing Voxy jar.
