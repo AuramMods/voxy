@@ -92,3 +92,9 @@ The Voxy model atlas includes the complete chain down to one texel per baked fac
 For Voxy water with a visible bed, the lighting pass uses the measured vertical depth for sunlight attenuation. The fog pass uses the actual view-ray distance from the surface to the bed. The old multipliers could hide shallow tops and the pool floor. At three chunks, the overhead macOS test showed the colored floor markings through the Voxy water.
 
 The cloud upscaler compares the first visible surface in both renderers. It rejects sky taps on terrain, including when all the surrounding low-resolution taps miss a thin foreground surface. Both opaque and translucent shadow filters now center every tap on the receiver. Colored shadow opacity uses the sample average.
+
+## Sunlight scattering just beyond the near terrain
+
+The first composite uses Bliss's existing shadow-map blocker search on Voxy pixels with scattering materials, such as leaves and grass. It runs only when the extra samples fit inside the shadow map and stores the measurements separately from ordinary shadow filtering. The lighting pass blends Bliss's near sunlight scattering into the existing LoD lighting. The effect uses horizontal distance and is strongest through the first extra chunk, then fades over the second. At three chunks of near render distance, the fade runs from 64 to 80 blocks.
+
+The macOS smoke client reloaded the shader in Oculus at three chunks. A temporary diagnostic on adjacent oak-leaf and stone strips showed full weight, a smooth fade, and zero weight on the distant leaves. The stone strip received no scattering. The regular shader was restored for the final reload. Existing Voxy builds that export `vxNearRenderDistance` can load the change directly.
