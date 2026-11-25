@@ -142,13 +142,18 @@ void traverse(in UnpackedNode node) {
                 // Basicly guarenteed to have a mesh, if it doesnt it is very very bad and incorect since its a violation of the graph properties
                 // that all leaf nodes must contain a mesh
 
+                #ifdef VOXY_STREAMED_TERRAIN
+                // Coverage can end inside a coarse tile. The terrain fragment shader clips it to the radius.
+                bool shouldRenderSelf = true;
+                #else
                 bool shouldRenderSelf = renderDistance<0.0f;
                 if (!shouldRenderSelf) {
                     vec3 far = furthestPointToCamera(node);
                     shouldRenderSelf = (far.x*far.x+far.z*far.z+(16*16*16))<=renderDistance;//the +16*16 is to add some buffer room
                 }
 
-                if (shouldRenderSelf) {
+                #endif
+                if (shouldRenderSelf && hasMesh(node)) {
                     enqueueSelfForRender(node);
                 }
             }

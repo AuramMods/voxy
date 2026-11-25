@@ -129,6 +129,7 @@ public class HierarchicalOcclusionTraverser {
             .defineIf("STATISTICS_BUFFER_BINDING", RenderStatistics.enabled, STATISTICS_BUFFER_BINDING)
 
             .defineIf("TAA", taa != null)
+            .defineIf("VOXY_STREAMED_TERRAIN", me.cortex.voxy.client.network.ClientLodStream.hasScope())
 
             .addSource(ShaderType.COMPUTE, scr)
             .compile();
@@ -227,7 +228,8 @@ public class HierarchicalOcclusionTraverser {
         }
 
         //Put the render distance here so that it can generate a correct circle, TODO: make it not top level section sized
-        MemoryUtil.memPutFloat(ptr, (float) Math.pow(VoxyConfig.CONFIG.sectionRenderDistance*16*32,2));ptr += 4;
+        float lodRadius = me.cortex.voxy.client.network.ClientLodStream.clampRadius(VoxyConfig.CONFIG.getLodRenderDistanceBlocks());
+        MemoryUtil.memPutFloat(ptr, lodRadius * lodRadius); ptr += 4;
 
 
     }

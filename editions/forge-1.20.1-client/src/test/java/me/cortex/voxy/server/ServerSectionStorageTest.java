@@ -1,5 +1,6 @@
 package me.cortex.voxy.server;
 
+import me.cortex.voxy.common.config.section.LodSectionStorage;
 import me.cortex.voxy.common.world.LodSectionSnapshot;
 import me.cortex.voxy.common.world.SurfaceDataCoverage;
 import me.cortex.voxy.common.world.WorldEngine;
@@ -22,7 +23,7 @@ class ServerSectionStorageTest {
         long column = 61;
         var data = new long[WorldSection.SECTION_VOLUME];
         data[9] = 0xf0_0000_0020_0000L;
-        try (var store = new ServerSectionStorage(path)) {
+        try (var store = new LodSectionStorage(path)) {
             assertFalse(store.hasColumn(column));
             assertNull(store.read(key));
             store.putIdMapping(21, ByteBuffer.wrap(new byte[]{5, 8, 13}));
@@ -32,7 +33,7 @@ class ServerSectionStorageTest {
             assertEquals(1, store.revision(key));
             store.commitColumn(column, List.of(snapshot));
         }
-        try (var store = new ServerSectionStorage(path)) {
+        try (var store = new LodSectionStorage(path)) {
             assertTrue(store.hasColumn(column));
             var revision = store.read(key);
             assertEquals(2, revision.number());
@@ -42,6 +43,22 @@ class ServerSectionStorageTest {
             var positions = new ArrayList<Long>();
             store.iteratePositions(4, positions::add);
             assertEquals(List.of(key), positions);
+        }
+    }
+    @Test
+    void acknowledgesRemoteRevisionOnlyWithItsStoredVoxels(@TempDir Path temp) throws Exception {
+        var path = temp.resolve("remote.sqlite");
+        var key = WorldEngine.getWorldSectionId(0, 7, 0, -8);
+        var snapshot = new LodSectionSnapshot(key, (byte) 0, SurfaceDataCoverage.raw(0),
+                new long[WorldSection.SECTION_VOLUME]);
+        try (var store = new LodSectionStorage(path)) {
+            assertTrue(store.commitRemote(snapshot, 13, (byte) 0));
+            snapshot.voxels()[0] = 1;
+            assertFalse(store.commitRemote(snapshot, 12, (byte) 1));
+        }
+        try (var store = new LodSectionStorage(path)) {
+            assertEquals(13, store.remoteTile(key).revision());
+            assertEquals(0, store.read(key).section().voxels()[0]);
         }
     }
 }

@@ -4,7 +4,10 @@ import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.RenderResourceReuse;
 import me.cortex.voxy.client.mixin.sodium.AccessorSodiumWorldRenderer;
 import me.cortex.voxy.common.Logger;
+import me.cortex.voxy.client.network.ClientLodStream;
 import me.cortex.voxy.common.StorageConfigUtil;
+import me.cortex.voxy.common.config.section.LodSectionStorage;
+import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.config.ConfigBuildCtx;
 import me.cortex.voxy.common.config.Serialization;
 import me.cortex.voxy.common.config.compressors.ZSTDCompressor;
@@ -80,7 +83,26 @@ public class VoxyClientInstance extends VoxyInstance {
     }
 
     @Override
+    public WorldEngine getOrCreate(WorldIdentifier identifier, boolean incrementRef) {
+        return super.getOrCreate(ClientLodStream.identity(identifier), incrementRef);
+    }
+
+    @Override
+    public WorldEngine getNullable(WorldIdentifier identifier) {
+        return super.getNullable(ClientLodStream.identity(identifier));
+    }
+
+    @Override
     protected SectionStorage createStorage(WorldIdentifier identifier) {
+        if (identifier.serverWorld != null) {
+            var path = this.basePath.resolve("remote-lod").resolve(identifier.getWorldId());
+            try {
+                java.nio.file.Files.createDirectories(path);
+                return new LodSectionStorage(path.resolve("lod.sqlite"));
+            } catch (java.io.IOException | java.sql.SQLException | ClassNotFoundException failure) {
+                throw new IllegalStateException("Opening Voxy multiplayer cache", failure);
+            }
+        }
         var ctx = new ConfigBuildCtx();
         ctx.setProperty(ConfigBuildCtx.BASE_SAVE_PATH, this.basePath.toString());
         ctx.setProperty(ConfigBuildCtx.WORLD_IDENTIFIER, identifier.getWorldId());

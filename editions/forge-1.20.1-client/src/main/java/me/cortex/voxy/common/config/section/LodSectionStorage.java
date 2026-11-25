@@ -1,7 +1,6 @@
-package me.cortex.voxy.server;
+package me.cortex.voxy.common.config.section;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import me.cortex.voxy.common.config.section.SectionStorage;
 import me.cortex.voxy.common.world.LodSectionSnapshot;
 import me.cortex.voxy.common.world.SurfaceDataCoverage;
 import me.cortex.voxy.common.world.WorldEngine;
@@ -23,12 +22,12 @@ import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
 /** One dimension's headless section store. Column coverage and its revised LODs commit together. */
-public final class ServerSectionStorage extends SectionStorage implements AutoCloseable {
+public final class LodSectionStorage extends SectionStorage implements AutoCloseable {
     public record Revision(long number, LodSectionSnapshot section) {}
 
     private final Connection db;
 
-    public ServerSectionStorage(Path path) throws SQLException, ClassNotFoundException {
+    public LodSectionStorage(Path path) throws SQLException, ClassNotFoundException {
         Class.forName("org.sqlite.JDBC");
         Connection connection = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
         try (var statement = connection.createStatement()) {
@@ -45,6 +44,11 @@ public final class ServerSectionStorage extends SectionStorage implements AutoCl
                     """);
             statement.execute("CREATE INDEX IF NOT EXISTS section_v1_level ON section_v1(level)");
             statement.execute("CREATE TABLE IF NOT EXISTS completed_columns (id INTEGER PRIMARY KEY)");
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS remote_tiles (
+                        id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, children INTEGER NOT NULL
+                    )
+                    """);
         } catch (SQLException ex) {
             try {
                 connection.close();
@@ -63,6 +67,34 @@ public final class ServerSectionStorage extends SectionStorage implements AutoCl
                 return result.next();
             }
         } catch (SQLException ex) {
+            throw storageFailure(ex);
+        }
+    }
+
+    public record RemoteTile(long revision, byte children) {}
+
+    public synchronized RemoteTile remoteTile(long key) {
+        try (var query = this.db.prepareStatement("SELECT revision, children FROM remote_tiles WHERE id=?")) {
+            query.setLong(1, key);
+            try (var result = query.executeQuery()) {
+                return result.next() ? new RemoteTile(result.getLong(1), result.getByte(2)) : null;
+            }
+        } catch (SQLException ex) {
+            throw storageFailure(ex);
+        }
+    }
+
+    public boolean commitRemote(LodSectionSnapshot section, long revision, byte children) {
+        try {
+            var bytes = encode(section);
+            synchronized (this) {
+                var current = this.remoteTile(section.key());
+                if (current != null && current.revision() >= revision) return false;
+                this.writeTransaction(null, java.util.List.of(section), new byte[][]{bytes},
+                        new RemoteTile(revision, children));
+                return true;
+            }
+        } catch (SQLException | IOException ex) {
             throw storageFailure(ex);
         }
     }
@@ -122,14 +154,14 @@ public final class ServerSectionStorage extends SectionStorage implements AutoCl
         int index = 0;
         try {
             for (var section : sections) data[index++] = encode(section);
-            this.writeTransaction(column, sections, data);
+            this.writeTransaction(column, sections, data, null);
         } catch (SQLException | IOException ex) {
             throw storageFailure(ex);
         }
     }
 
-    private synchronized void writeTransaction(Long column, Collection<LodSectionSnapshot> sections, byte[][] data)
-            throws SQLException {
+    private synchronized void writeTransaction(Long column, Collection<LodSectionSnapshot> sections, byte[][] data,
+            RemoteTile remote) throws SQLException {
         this.db.setAutoCommit(false);
         try {
             try (var update = this.db.prepareStatement("""
@@ -149,6 +181,14 @@ public final class ServerSectionStorage extends SectionStorage implements AutoCl
                 try (var done = this.db.prepareStatement("INSERT OR IGNORE INTO completed_columns(id) VALUES(?)")) {
                     done.setLong(1, column);
                     done.executeUpdate();
+                }
+            }
+            if (remote != null) {
+                try (var put = this.db.prepareStatement("INSERT OR REPLACE INTO remote_tiles VALUES(?, ?, ?)")) {
+                    put.setLong(1, sections.iterator().next().key());
+                    put.setLong(2, remote.revision());
+                    put.setByte(3, remote.children());
+                    put.executeUpdate();
                 }
             }
             this.db.commit();

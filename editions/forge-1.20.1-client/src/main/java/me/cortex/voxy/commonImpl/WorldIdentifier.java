@@ -16,6 +16,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.lang.ref.WeakReference;
+import java.util.Objects;
+import java.util.UUID;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
@@ -25,10 +27,16 @@ public class WorldIdentifier {
     public final ResourceKey<Level> key;
     public final long biomeSeed;
     public final ResourceKey<DimensionType> dimension;//Maybe?
+    public final @Nullable UUID serverWorld;
     private final transient long hashCode;
     @Nullable transient WeakReference<WorldEngine> cachedEngineObject;
 
     public WorldIdentifier(@NotNull ResourceKey<Level> key, long biomeSeed, @Nullable ResourceKey<DimensionType> dimension) {
+        this(key, biomeSeed, dimension, null);
+    }
+
+    public WorldIdentifier(ResourceKey<Level> key, long biomeSeed, @Nullable ResourceKey<DimensionType> dimension,
+                           @Nullable UUID serverWorld) {
         if (key == null) {
             throw new IllegalStateException("Key cannot be null");
         }
@@ -36,7 +44,10 @@ public class WorldIdentifier {
         this.key = key;
         this.biomeSeed = biomeSeed;
         this.dimension = dimension;
-        this.hashCode = mixStafford13(registryKeyHashCode(key))^mixStafford13(registryKeyHashCode(dimension))^mixStafford13(biomeSeed);
+        this.serverWorld = serverWorld;
+        this.hashCode = mixStafford13(registryKeyHashCode(key)) ^ mixStafford13(registryKeyHashCode(dimension))
+                ^ mixStafford13(biomeSeed) ^ (serverWorld == null ? 0
+                : mixStafford13(serverWorld.getMostSignificantBits()) ^ mixStafford13(serverWorld.getLeastSignificantBits()));
     }
 
     @Override
@@ -49,6 +60,7 @@ public class WorldIdentifier {
         if (obj instanceof WorldIdentifier other) {
             return other.hashCode == this.hashCode &&
                     other.biomeSeed == this.biomeSeed &&
+                    Objects.equals(other.serverWorld, this.serverWorld) &&
                     equal(other.key, this.key) &&//other.key.equals(this.key) &&
                     equal(other.dimension, this.dimension)//other.dimension.equals(this.dimension)
                     ;
@@ -148,6 +160,7 @@ public class WorldIdentifier {
 
     public static String getWorldId(WorldIdentifier identifier) {
         String data = identifier.biomeSeed + identifier.key.toString();
+        if (identifier.serverWorld != null) data += ":" + identifier.serverWorld;
         try {
             return bytesToHex(MessageDigest.getInstance("SHA-256").digest(data.getBytes())).substring(0, 32);
         } catch (

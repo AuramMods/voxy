@@ -1,6 +1,7 @@
 package me.cortex.voxy.client;
 
 import me.cortex.voxy.client.config.VoxyConfig;
+import me.cortex.voxy.client.network.ClientLodStream;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 
 public class ClientSessionEvents {
@@ -9,6 +10,7 @@ public class ClientSessionEvents {
     public static void sessionStart() {
         if (inSession) throw new IllegalStateException("Cannot start new session while in a session");
         inSession = true;
+        ClientLodStream.open();
 
         //Should never try creating multiple instances via session start
         if (VoxyCommon.getInstance() != null) throw new IllegalStateException();
@@ -24,6 +26,7 @@ public class ClientSessionEvents {
         if (!inSession) throw new IllegalStateException("Cannot end a session while not in a session");
         inSession = false;
 
+        ClientLodStream.close();
         VoxyCommon.shutdownInstance();
     }
 }

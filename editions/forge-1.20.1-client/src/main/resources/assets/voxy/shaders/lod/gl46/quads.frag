@@ -292,6 +292,11 @@ void main() {
         return;
     }
 
+    if (streamedTerrainRadiusSquared > 0.0) {
+        vec2 offset = trackLocalPosition.xz - cameraSubPos.xz;
+        if (dot(offset, offset) > streamedTerrainRadiusSquared) discard;
+    }
+
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     float nearReadiness = nearSectionReadiness();
     bool coveredByNearSection = submittedNearInterior(nearReadiness);

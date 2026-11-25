@@ -498,7 +498,8 @@ public class VoxyRenderSystem {
     }
 
     public void setRenderDistance(float renderDistance) {
-        this.renderDistanceTracker.setRenderDistance((int) Math.ceil(renderDistance+1));//the +1 is to cover the outer ring of chunks when rendering a circle
+        float blocks = me.cortex.voxy.client.network.ClientLodStream.clampRadius(renderDistance * 512);
+        this.renderDistanceTracker.setRenderDistance((int) Math.ceil(blocks / 512 + 1));
     }
 
     public Viewport<?> getViewport() {
