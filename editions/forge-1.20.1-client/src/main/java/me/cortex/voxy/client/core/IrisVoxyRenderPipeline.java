@@ -37,6 +37,10 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
 
     private final GlBuffer shaderUniforms;
 
+    public boolean hasTerrainTransition() {
+        return this.terrainTransition;
+    }
+
     public IrisVoxyRenderPipeline(RenderProperties properties, IrisVoxyRenderPipelineData data, AsyncNodeManager nodeManager, NodeCleaner nodeCleaner, HierarchicalOcclusionTraverser traversal, BooleanSupplier frexSupplier) {
         super(properties, nodeManager, nodeCleaner, traversal, frexSupplier, data.shouldDeferTranslucency());
         try {

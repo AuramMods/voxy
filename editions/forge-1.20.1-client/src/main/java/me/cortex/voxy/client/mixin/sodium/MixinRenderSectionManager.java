@@ -4,6 +4,7 @@ import me.cortex.voxy.client.ICheekyClientChunkCache;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.client.core.VoxyRenderSystem;
+import me.cortex.voxy.client.core.util.IrisUtil;
 import me.cortex.voxy.common.world.service.VoxelIngestService;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.jellysquid.mods.sodium.client.gl.device.CommandList;
@@ -27,12 +28,22 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(value = RenderSectionManager.class, remap = false)
 public class MixinRenderSectionManager {
     @Shadow(aliases = "world") @Final private ClientLevel level;
 
     @Shadow @Final private ChunkBuilder builder;
+
+    @Inject(method = "needsUpdate", at = @At("RETURN"), cancellable = true)
+    private void voxy$expireDepartingTerrain(CallbackInfoReturnable<Boolean> cir) {
+        if (cir.getReturnValueZ() || IrisUtil.irisShadowActive()) return;
+        var system = ((IGetVoxyRenderSystem) this.level.levelRenderer).voxy$getRenderSystem();
+        if (system == null) return;
+        var coverage = system.getTerrainTransitionCoverage();
+        if (coverage != null && coverage.visibilityExpired()) cir.setReturnValue(true);
+    }
 
     @Inject(method = "<init>", at = @At("TAIL"))
     private void voxy$resetChunkTracker(

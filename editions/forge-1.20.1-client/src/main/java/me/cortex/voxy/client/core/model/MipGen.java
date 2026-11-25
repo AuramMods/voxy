@@ -112,7 +112,7 @@ public class MipGen {
 
 
         long dAddr = addr;
-        for (int i = 0; i < LAYERS-1; i++) {
+        for (int i = 0; i < LAYERS; i++) {
             long sAddr = dAddr;
             dAddr += (MODEL_TEXTURE_SIZE*MODEL_TEXTURE_SIZE*3*2*4)>>(i<<1);//is.. i*2 because shrink both MODEL_TEXTURE_SIZE by >>i so is 2*i total shift
             int sTileSize = MODEL_TEXTURE_SIZE >> i;

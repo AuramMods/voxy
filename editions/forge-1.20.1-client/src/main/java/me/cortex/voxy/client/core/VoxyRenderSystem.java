@@ -81,6 +81,11 @@ public class VoxyRenderSystem {
     private final AbstractRenderPipeline pipeline;
     private final RenderProperties properties;
 
+    public NearTerrainCoverage getTerrainTransitionCoverage() {
+        return this.pipeline instanceof IrisVoxyRenderPipeline iris && iris.hasTerrainTransition()
+                ? this.nearTerrainCoverage : null;
+    }
+
     // Fog parameters captured before modification by MixinFogRenderer, for Voxy's own fog pass
     private float capturedFogStart;
     private float capturedFogEnd;

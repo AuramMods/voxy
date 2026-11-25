@@ -4,7 +4,6 @@ import com.llamalad7.mixinextras.sugar.Local;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.client.core.rendering.NearTerrainCoverage;
 import me.cortex.voxy.client.core.util.IrisUtil;
-import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.jellysquid.mods.sodium.client.gl.device.CommandList;
 import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
 import me.jellysquid.mods.sodium.client.render.chunk.DefaultChunkRenderer;
@@ -48,14 +47,8 @@ public class MixinNearTerrainCoverage {
     private static void voxy$recordSection(
             CallbackInfo ci, @Local(argsOnly = true) RenderRegion region, @Local(ordinal = 4) int sectionIndex) {
         if (voxy$solidPass == null) return;
-        int x = region.getChunkX() + LocalSectionIndex.unpackX(sectionIndex);
-        int y = region.getChunkY() + LocalSectionIndex.unpackY(sectionIndex);
-        int z = region.getChunkZ() + LocalSectionIndex.unpackZ(sectionIndex);
-        if (VoxyCommon.IS_MINE_IN_ABYSS) {
-            int sector = (x + 512) >> 10;
-            x -= sector << 10;
-            y += 16 + (256 - 32 - sector * 30);
-        }
-        voxy$solidPass.submit(x, y, z);
+        voxy$solidPass.submit(region.getChunkX() + LocalSectionIndex.unpackX(sectionIndex),
+                region.getChunkY() + LocalSectionIndex.unpackY(sectionIndex),
+                region.getChunkZ() + LocalSectionIndex.unpackZ(sectionIndex));
     }
 }

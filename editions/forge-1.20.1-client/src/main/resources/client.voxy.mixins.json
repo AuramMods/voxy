@@ -54,6 +54,7 @@
     "sodium.MixinChunkJobQueue",
     "sodium.MixinCloudRenderer",
     "sodium.MixinNearTerrainCoverage",
+    "sodium.MixinOcclusionCuller",
     // "sodium.MixinDefaultChunkRenderer",
     // "sodium.MixinRenderRegionManager",
     "sodium.MixinRenderSectionManager",

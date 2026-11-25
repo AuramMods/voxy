@@ -58,8 +58,12 @@ uint unpackAlpha8(float alpha) {
     return uint(round(clamp(alpha, 0.0, 1.0) * 255.0));
 }
 
+vec4 sampleBaseTexel(vec2 texturePos) {
+    return texelFetch(blockModelAtlas, ivec2(texturePos * vec2(textureSize(blockModelAtlas, 0))), 0);
+}
+
 bool sampleTintMask(vec2 texturePos) {
-    return (unpackAlpha8(textureLod(blockModelAtlas, texturePos, 0).a) & 1u) != 0u;
+    return (unpackAlpha8(sampleBaseTexel(texturePos).a) & 1u) != 0u;
 }
 
 vec4 clearTintMaskFromColour(vec4 colour) {
@@ -99,7 +103,7 @@ bool useCoarseFluidProxy() {
     return ((interData.w >> 13u) & 1u) == 1u;
 }
 
-vec2 varyBalancedLeafUV(vec2 localUV, vec2 tile, out uint transform, out uint leafHash) {
+vec2 varyBalancedLeafUV(vec2 localUV, vec2 tile, out uint leafHash) {
     uvec2 tilePos = uvec2(max(tile, vec2(0.0f)));
     uint hash = interData.w >> 16u;
     hash ^= tilePos.x * 0x9e3779b9u;
@@ -108,7 +112,7 @@ vec2 varyBalancedLeafUV(vec2 localUV, vec2 tile, out uint transform, out uint le
     hash *= 0x7feb352du;
     hash ^= hash >> 15u;
     leafHash = hash;
-    transform = hash & 7u;
+    uint transform = hash & 7u;
     if ((transform & 1u) != 0u) localUV = localUV.yx;
     if ((transform & 2u) != 0u) localUV.x = 1.0f - localUV.x;
     if ((transform & 4u) != 0u) localUV.y = 1.0f - localUV.y;
@@ -191,8 +195,6 @@ ivec3 fragmentBlock() {
     return ivec3(floor(inside)) + baseSectionPos * 32;
 }
 
-const float nearHandoffDurationMs = 180.0;
-
 float nearSectionReadiness() {
     vec3 offset = trackLocalPosition - cameraSubPos;
     float overlap = nearInteriorRadius + 24.0;
@@ -204,7 +206,9 @@ float nearSectionReadiness() {
         ivec4 entry = nearTerrainSections[slot];
         if (entry.w == 0) return -1.0;
         if (all(equal(entry.xyz, section))) {
-            return smoothstep(0.0, nearHandoffDurationMs, float(nearTerrainTime - uint(entry.w)));
+            uint elapsed = (nearTerrainTime - uint(entry.w)) & 0x7fffffffu;
+            float progress = smoothstep(0.0, float(nearTerrainHeader.y), float(elapsed));
+            return entry.w < 0 ? 1.0 - progress : progress;
         }
         slot = (slot + 1u) & mask;
     }
@@ -249,33 +253,28 @@ void main() {
     #endif
     #endif
 
-    uint leafTransform = 0u;
     uint leafHash = 0u;
     vec2 localUV = modf(uv, tile);
     if (useBalancedLeafCutout()) {
-        localUV = varyBalancedLeafUV(localUV, tile, leafTransform, leafHash);
+        localUV = varyBalancedLeafUV(localUV, tile, leafHash);
     }
-    vec2 uv2 = localUV*(1.0/(vec2(3.0,2.0)*256.0));
-    vec4 colour;
-    vec2 texPos = uv2 + getBaseUV();
-//This is deprecated, TODO: remove the non mip code path
-    //if (useMipmaps())
-    {
-        vec2 uvSmol = uv*(1.0/(vec2(3.0,2.0)*256.0));
-        vec2 dx = dFdx(uvSmol);//vec2(lDx, dDx);
-        vec2 dy = dFdy(uvSmol);//vec2(lDy, dDy);
-        if ((leafTransform & 1u) != 0u) { dx = dx.yx; dy = dy.yx; }
-        if ((leafTransform & 2u) != 0u) { dx.x = -dx.x; dy.x = -dy.x; }
-        if ((leafTransform & 4u) != 0u) { dx.y = -dx.y; dy.y = -dy.y; }
-        colour = textureGrad(blockModelAtlas, texPos, dx, dy);
-        colour = clearTintMaskFromColour(colour);
-        if (useCoarseFluidProxy() && colour.a == 0.0f) {
-            vec2 faceCentre = getBaseUV() + vec2(0.5f) / (vec2(3.0f, 2.0f) * 256.0f);
-            colour = clearTintMaskFromColour(textureLod(blockModelAtlas, faceCentre, 0));
-        }
-    }// else {
-    //    colour = textureLod(blockModelAtlas, texPos, 0);
-    //}
+
+    const vec2 faceScale = 1.0 / (vec2(3.0, 2.0) * 256.0);
+    const float faceSize = 16.0;
+    vec2 baseUV = getBaseUV();
+    vec2 dx = dFdx(uv) * faceSize;
+    vec2 dy = dFdy(uv) * faceSize;
+    float lod = 0.5 * log2(max(1.0, max(dot(dx, dx), dot(dy, dy))));
+    lod = min(lod, log2(faceSize));
+
+    // Keep both trilinear levels inside this face. Adjacent tiles are unrelated models.
+    float inset = 0.5 * exp2(ceil(lod)) / faceSize;
+    vec2 filteredUV = clamp(localUV, inset, 1.0 - inset);
+    vec2 texPos = baseUV + clamp(localUV, 0.5 / faceSize, 1.0 - 0.5 / faceSize) * faceScale;
+    vec4 colour = clearTintMaskFromColour(textureLod(blockModelAtlas, baseUV + filteredUV * faceScale, lod));
+    if (useCoarseFluidProxy() && colour.a == 0.0f) {
+        colour = clearTintMaskFromColour(sampleBaseTexel(baseUV + 0.5 * faceScale));
+    }
 
     //If we are in shaders and are a helper invocation, just exit, as it enables extra performance gains for small sized
     // fragments, we do this here after derivative computation
@@ -322,14 +321,16 @@ void main() {
 
     //Also, small quad is really fking over the mipping level somehow
     #ifndef TRANSLUCENT
-    float cutoutAlpha = useBalancedLeafCutout() ? colour.a : textureLod(blockModelAtlas, texPos, 0).a;
-    if (useBalancedLeafCutout() && sparseBalancedLeafHole(localUV, leafHash)) cutoutAlpha = 0.0f;
+    float cutoutAlpha = useBalancedLeafCutout() ? colour.a : sampleBaseTexel(texPos).a;
+    if (useBalancedLeafCutout() && lod < 1.0 && sparseBalancedLeafHole(localUV, leafHash)) {
+        cutoutAlpha *= smoothstep(0.0, 1.0, lod);
+    }
     float cutoutThreshold = useBalancedLeafCutout() ? 0.42f : 0.1f;
     colour.a = 1.0f;
     if (useDiscard() && cutoutAlpha <= cutoutThreshold) {
     //if (useDiscard() && (colour.a <= 0.1f)) {
     #else
-    if (textureLod(blockModelAtlas, texPos, 0).a == 0.0f) {
+    if (sampleBaseTexel(texPos).a == 0.0f) {
     #endif
         //This is stupidly stupidly bad for divergence
         //TODO: FIXME, basicly what this do is sample the exact pixel (no lod) for discarding, this stops mipmapping fucking it over

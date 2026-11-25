@@ -57,6 +57,7 @@ import static org.lwjgl.opengl.GL11.*;
 public class ModelFactory {
     public static final int MODEL_TEXTURE_SIZE = 16;
     public static final int LAYERS = Integer.numberOfTrailingZeros(MODEL_TEXTURE_SIZE);
+    public static final int MODEL_MIP_LEVELS = LAYERS + 1;
 
     // 模型去重键的字段顺序与 GPU 元数据写入顺序保持一致。
     private record ModelEntry(ColourDepthTextureData down, ColourDepthTextureData up, ColourDepthTextureData north, ColourDepthTextureData south, ColourDepthTextureData west, ColourDepthTextureData east, int fluidBlockStateId, int tintingColour, boolean leafModel, boolean trackModel) {
@@ -387,7 +388,7 @@ public class ModelFactory {
             int Y = ((this.modelId>>8)&0xFF) * MODEL_TEXTURE_SIZE*2;
 
             long cAddr = this.texture.address;
-            for (int lvl = 0; lvl < LAYERS; lvl++) {
+            for (int lvl = 0; lvl < MODEL_MIP_LEVELS; lvl++) {
                 nglTextureSubImage2D(atlas.id, lvl, X >> lvl, Y >> lvl, (MODEL_TEXTURE_SIZE*3) >> lvl, (MODEL_TEXTURE_SIZE*2) >> lvl, GL_RGBA, GL_UNSIGNED_BYTE, cAddr);
                 cAddr += (MODEL_TEXTURE_SIZE*MODEL_TEXTURE_SIZE*3*2*4)>>(lvl<<1);
             }
