@@ -25,7 +25,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
-import org.lwjgl.system.MemoryUtil;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -228,12 +227,7 @@ public class Mapper {
         this.block2stateEntry.put(state, entry);
         this.blockLock.unlock();
 
-        byte[] serialized = entry.serialize();
-        ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
-        buffer.put(serialized);
-        buffer.rewind();
-        this.storage.putIdMapping(entry.id | (BLOCK_STATE_TYPE<<30), buffer);
-        MemoryUtil.memFree(buffer);
+        this.storage.putIdMapping(entry.id | (BLOCK_STATE_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
         //this.storage.flush();
 
         if (this.newStateCallback!=null)this.newStateCallback.accept(entry);
@@ -252,12 +246,7 @@ public class Mapper {
         this.biome2biomeEntry.put(biome, entry);
         this.biomeLock.unlock();
 
-        byte[] serialized = entry.serialize();
-        ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
-        buffer.put(serialized);
-        buffer.rewind();
-        this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), buffer);
-        MemoryUtil.memFree(buffer);
+        this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
         //this.storage.flush();
 
         if (this.newBiomeCallback!=null)this.newBiomeCallback.accept(entry);
@@ -354,12 +343,7 @@ public class Mapper {
             if (this.blockId2stateEntry.indexOf(entry) != entry.id) {
                 throw new IllegalStateException("State Id NOT THE SAME, very critically bad. arr:" + this.blockId2stateEntry.indexOf(entry) + " entry: " + entry.id);
             }
-            byte[] serialized = entry.serialize();
-            ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
-            buffer.put(serialized);
-            buffer.rewind();
-            this.storage.putIdMapping(entry.id | (BLOCK_STATE_TYPE<<30), buffer);
-            MemoryUtil.memFree(buffer);
+            this.storage.putIdMapping(entry.id | (BLOCK_STATE_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
         }
 
         for (var entry : biomes) {
@@ -367,12 +351,7 @@ public class Mapper {
                 throw new IllegalStateException("Biome Id NOT THE SAME, very critically bad");
             }
 
-            byte[] serialized = entry.serialize();
-            ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
-            buffer.put(serialized);
-            buffer.rewind();
-            this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), buffer);
-            MemoryUtil.memFree(buffer);
+            this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
         }
 
         this.storage.flush();

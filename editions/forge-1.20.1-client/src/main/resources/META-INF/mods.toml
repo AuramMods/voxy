@@ -7,7 +7,7 @@ issueTrackerURL="https://github.com/NHblock-Johnsnow/neo-voxy/issues"
 modId="voxy"
 version="${version}"
 displayName="Neo-Voxy"
-description="Minecraft 1.20.1 Forge port focused on core Voxy LOD rendering and stability fixes."
+description="Voxy level-of-detail terrain for Minecraft 1.20.1 Forge."
 authors="Cortex, JohnSnow"
 logoFile="assets/voxy/icon.png"
 
@@ -16,14 +16,14 @@ modId="forge"
 mandatory=true
 versionRange="[47.3,)"
 ordering="NONE"
-side="CLIENT"
+side="BOTH"
 
 [[dependencies.voxy]]
 modId="minecraft"
 mandatory=true
 versionRange="[1.20.1]"
 ordering="NONE"
-side="CLIENT"
+side="BOTH"
 
 [[dependencies.voxy]]
 modId="embeddium"

@@ -129,7 +129,8 @@ public class LMDBStorageBackend extends StorageBackend {
         this.resizingTransaction(()->this.idMappingDatabase.transaction(transaction->{
             var keyBuff = transaction.stack.malloc(4);
             keyBuff.putInt(0, id);
-            transaction.put(keyBuff, data, 0);
+            var value = data.isDirect() ? data : transaction.stack.malloc(data.remaining()).put(data.duplicate()).flip();
+            transaction.put(keyBuff, value, 0);
             return null;
         }));
     }

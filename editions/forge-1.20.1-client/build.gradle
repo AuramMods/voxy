@@ -135,7 +135,12 @@ dependencies {
     implementation 'org.lz4:lz4-java:1.8.0'
     include implementation('org.tukaani:xz:1.10')
     include implementation('org.xerial:sqlite-jdbc:3.49.1.0')
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.11.4'
 }
+
+tasks.named('test') { useJUnitPlatform() }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'

@@ -42,6 +42,8 @@ public class ClientVoxyMixinPlugin implements IMixinConfigPlugin {
     }
 
     @Override public List<String> getMixins() {
+        if (!FMLLoader.getDist().isClient()) return List.of();
+
         List<String> mixins = new ArrayList<>();
         if (seedGenCompatible) mixins.add(SeedGenBootstrap.MIXIN);
         if (valkyrienSkiesInstalled && !nvidiumInstalled) {
