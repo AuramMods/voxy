@@ -38,9 +38,11 @@ public final class LocalLodTerrain implements AutoCloseable {
                 var section = this.world.acquire(key);
                 try {
                     synchronized (section) {
+                        byte previous = section.getNonEmptyChildren();
                         if (this.world.storage.loadSection(section) == 0) {
-                            this.world.markDirty(section, WorldEngine.DEFAULT_UPDATE_FLAGS
-                                    | WorldEngine.UPDATE_TYPE_DONT_SAVE, WorldEngine.ALL_MESH_NEIGHBORS);
+                            int flags = WorldEngine.UPDATE_TYPE_BLOCK_BIT | WorldEngine.UPDATE_TYPE_DONT_SAVE;
+                            if (previous != section.getNonEmptyChildren()) flags |= WorldEngine.UPDATE_TYPE_CHILD_EXISTENCE_BIT;
+                            this.world.markDirty(section, flags, WorldEngine.ALL_MESH_NEIGHBORS);
                         }
                     }
                 } finally {

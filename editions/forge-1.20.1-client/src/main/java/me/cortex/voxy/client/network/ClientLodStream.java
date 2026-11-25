@@ -255,15 +255,17 @@ public final class ClientLodStream {
         if (context != ready) return;
         int level = WorldEngine.getLevel(snapshot.key());
         byte children = snapshot.children();
-        if (level > 0 && !allChildrenReady(ready, snapshot.key(), children)) {
-            snapshot = new LodSectionSnapshot(snapshot.key(), (byte) 0, snapshot.coverage(), snapshot.voxels());
-        }
         var target = ready.world.acquire(snapshot.key());
         try {
             synchronized (target) {
+                byte previous = target.getNonEmptyChildren();
+                byte drawable = drawableChildren(ready, snapshot.key(), children, previous);
+                if (drawable != children) {
+                    snapshot = new LodSectionSnapshot(snapshot.key(), drawable, snapshot.coverage(), snapshot.voxels());
+                }
                 if (ready.storage.commitRemote(snapshot, ready.scope.session(), message.version(), children)) {
                     snapshot.copyInto(target);
-                    notifyRenderer(ready.world, target);
+                    notifyMeshUpdate(ready.world, target, previous != drawable);
                 }
             }
         } finally {
@@ -281,9 +283,10 @@ public final class ClientLodStream {
         if (target != null) {
             try {
                 synchronized (target) {
+                    boolean hadChildren = target.getNonEmptyChildren() != 0;
                     new LodSectionSnapshot(key, (byte) 0, SurfaceDataCoverage.legacy(level),
                             new long[WorldSection.SECTION_VOLUME]).copyInto(target);
-                    notifyRenderer(ready.world, target);
+                    notifyMeshUpdate(ready.world, target, hadChildren);
                 }
             } finally {
                 target.release(WorldSection.RELEASE_HINT_DONT_CACHE);
@@ -300,15 +303,17 @@ public final class ClientLodStream {
     private static void refreshParent(Context ready, long key) {
         var tile = ready.storage.remoteTile(key);
         if (tile == null) return;
-        byte children = allChildrenReady(ready, key, tile.children()) ? tile.children() : 0;
         var section = ready.world.acquireIfExists(key);
         if (section == null) return;
         try {
             synchronized (section) {
-                if (section.getNonEmptyChildren() != children) {
+                byte previous = section.getNonEmptyChildren();
+                byte children = drawableChildren(ready, key, tile.children(), previous);
+                if (previous != children) {
                     section._unsafeSetNonEmptyChildren(children);
                     ready.storage.saveSection(section);
-                    notifyRenderer(ready.world, section);
+                    ready.world.markDirty(section, WorldEngine.UPDATE_TYPE_CHILD_EXISTENCE_BIT
+                            | WorldEngine.UPDATE_TYPE_DONT_SAVE, 0);
                 }
             }
         } finally {
@@ -316,23 +321,30 @@ public final class ClientLodStream {
         }
     }
 
-    private static boolean allChildrenReady(Context ready, long key, byte children) {
+    private static byte drawableChildren(Context ready, long key, byte advertised, byte previous) {
         int lod = WorldEngine.getLevel(key) - 1;
-        if (lod < 0) return true;
+        if (lod < 0 || advertised == 0) return advertised;
         int baseX = WorldEngine.getX(key) * 2;
         int baseY = WorldEngine.getY(key) * 2;
         int baseZ = WorldEngine.getZ(key) * 2;
+        int available = 0;
         for (int child = 0; child < 8; child++) {
-            if ((children & 1 << child) == 0) continue;
+            if ((advertised & 1 << child) == 0) continue;
             long childKey = WorldEngine.getWorldSectionId(lod, baseX + (child & 1),
                     baseY + ((child >> 2) & 1), baseZ + ((child >> 1) & 1));
-            if (ready.storage.remoteTile(childKey) == null) return false;
+            if (ready.storage.remoteTile(childKey) != null) available |= 1 << child;
         }
-        return true;
+        return selectDrawableChildren(previous, advertised, (byte) available);
     }
 
-    private static void notifyRenderer(WorldEngine world, WorldSection section) {
-        world.markDirty(section, WorldEngine.DEFAULT_UPDATE_FLAGS | WorldEngine.UPDATE_TYPE_DONT_SAVE,
-                WorldEngine.ALL_MESH_NEIGHBORS);
+    static byte selectDrawableChildren(byte previous, byte advertised, byte available) {
+        // A cold parent waits for full coverage. A parent already split keeps every usable child.
+        return (available & advertised) == advertised ? advertised : (byte) (previous & advertised & available);
+    }
+
+    private static void notifyMeshUpdate(WorldEngine world, WorldSection section, boolean childrenChanged) {
+        int flags = WorldEngine.UPDATE_TYPE_BLOCK_BIT | WorldEngine.UPDATE_TYPE_DONT_SAVE;
+        if (childrenChanged) flags |= WorldEngine.UPDATE_TYPE_CHILD_EXISTENCE_BIT;
+        world.markDirty(section, flags, WorldEngine.ALL_MESH_NEIGHBORS);
     }
 }
