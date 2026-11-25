@@ -1,8 +1,9 @@
 package me.cortex.voxy.client.mixin;
 
-import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.client.compat.seedgen.SeedGenBootstrap;
 import me.cortex.voxy.client.compat.seedgen.SeedGenCalls;
+import net.minecraftforge.fml.loading.FMLLoader;
+import net.minecraftforge.fml.loading.LoadingModList;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
@@ -13,24 +14,26 @@ import java.util.Set;
 
 public class ClientVoxyMixinPlugin implements IMixinConfigPlugin {
     private boolean seedGenCompatible;
-    private static boolean valkyrienSkiesInstalled;
-    private static boolean nvidiumInstalled;
-    private static boolean irisInstalled;
-    private static boolean createInstalled;
+    private boolean valkyrienSkiesInstalled;
+    private boolean nvidiumInstalled;
+    private boolean irisInstalled;
+    private boolean createInstalled;
 
     @Override
     public void onLoad(String mixinPackage) {
-        if (net.minecraftforge.fml.loading.FMLLoader.getDist().isClient()) {
-            var loadingMods = net.minecraftforge.fml.loading.LoadingModList.get();
-            var seedGenFile = loadingMods == null ? null : loadingMods.getModFileById(SeedGenBootstrap.MOD_ID);
+        // Use loader metadata here. Initializing Voxy's config serializers during
+        // mixin selection can load Minecraft classes before their mixins are prepared.
+        var loadingMods = LoadingModList.get();
+        if (loadingMods == null) return;
+        if (FMLLoader.getDist().isClient()) {
+            var seedGenFile = loadingMods.getModFileById(SeedGenBootstrap.MOD_ID);
             seedGenCompatible = seedGenFile != null && seedGenFile.getMods().stream().anyMatch(mod ->
                     SeedGenBootstrap.MOD_ID.equals(mod.getModId()) && SeedGenBootstrap.supports(mod.getVersion().toString()));
         }
-        valkyrienSkiesInstalled = VoxyCommon.getPlatformUtil().isModLoaded("valkyrienskies");
-        nvidiumInstalled = VoxyCommon.getPlatformUtil().isModLoaded("nvidium");
-        irisInstalled = VoxyCommon.getPlatformUtil().isModLoaded("iris")
-                || VoxyCommon.getPlatformUtil().isModLoaded("oculus");
-        createInstalled = VoxyCommon.getPlatformUtil().isModLoaded("create");
+        valkyrienSkiesInstalled = loadingMods.getModFileById("valkyrienskies") != null;
+        nvidiumInstalled = loadingMods.getModFileById("nvidium") != null;
+        irisInstalled = loadingMods.getModFileById("iris") != null || loadingMods.getModFileById("oculus") != null;
+        createInstalled = loadingMods.getModFileById("create") != null;
     }
 
     @Override

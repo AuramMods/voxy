@@ -48,4 +48,12 @@ In the disposable `Voxy Smoke` world, the blue and red landmarks sit 184 and 208
 | Background and sound | GLFW focus was disabled for the isolated client. The active application stayed in front during the final launch, and the profile's master volume was zero. |
 | Windows | The jar retained x64 Windows natives for all four storage libraries and declares no GLA dependency. The available Parallels Windows entries were invalid, so Windows runtime behavior remains unverified. |
 
-Full Auram mod coverage, custom dimensions, and performance benchmarks are separate follow-up work. The staged shader changes are recorded in [AuramBliss changes for Voxy](aurambliss-voxy-changes.md).
+## Full Auram launch regression
+
+The full-pack smoke profile is `AuramVoxyFullTest` in Prism. It uses the same 541 enabled mod jars as Auram, including Connector and Impersonate. Leave Distant Horizons installed and set `[client.advanced.debugging].rendererMode` to `"DISABLED"` in `config/DistantHorizons.toml`. The profile uses the AuramBliss shader and preset from the pack, five chunks of near render distance, zero master volume, and the disposable **Voxy Smoke** world.
+
+The previous jar initialized Voxy's serializers while its mixin plugin was checking for optional mods. That loaded Minecraft's `Component` before Connector prepared Impersonate's mixin. The Forge plugin now checks Forge's loading metadata directly, and Voxy's serializers initialize on the render thread after mixin preparation.
+
+The rebuilt jar entered the smoke world and started `IrisVoxyRenderPipeline` with `MDICSectionRenderer`. Both distant landmarks and the bridge rendered outside the five-chunk near distance on both the initial run and after a clean restart without another import. The local screenshots are in the full-pack profile at `evidence/02-full-auram-voxy.png` and `evidence/03-full-auram-voxy-restart.png`.
+
+Custom dimensions and performance in the full pack remain unverified. The staged shader changes are recorded in [AuramBliss changes for Voxy](aurambliss-voxy-changes.md).
