@@ -112,3 +112,9 @@ In the three-chunk macOS smoke client with 80% TAA upscaling, the 99th-percentil
 The Overworld now applies contact and cloud shadows independently of the subsurface scattering mode. The contact ray uses the foliage marker to choose its reach. Near and Voxy terrain use the same leaf and grass markers, including the leaf marker that Bliss uses to calculate skylight scattering. The two-chunk sunlight extension uses the same depth-aware blocker filter as near terrain.
 
 In a fixed daylight scene on macOS at three chunks, switching from None to Hardcoded only previously shifted the mean brightness of a stone cliff by 49 luma levels out of 255. With the patch, the shift was under one level and the tree crop still gained about 19 levels. A temporary material diagnostic on adjacent oak and stone strips confirmed that the same foliage marker and hardcoded scattering density cross the Embeddium-to-Voxy boundary. The change takes effect on shader reload.
+
+## Water over the terrain handoff and from below
+
+When either the surface or the bed uses Voxy, Bliss reconstructs both depths before calculating sunlight absorption and water fog. This includes near water over a Voxy bed. When the camera is submerged, the surface ends the water path. The shader leaves air cloud opacity out of that path, adds water scattering once, and fades visibility over two chunks beyond the near distance, with the fade starting at no more than 64 blocks. Voxy water viewed from below uses the underwater reflection model and respects the Snell's Window option.
+
+In the three-chunk macOS smoke client, a depth diagnostic showed both the mixed water column and the Voxy-only water column. The regular shader showed the submerged test stripe through the water from above. With the camera underwater, the opaque pass contained the marker 54 blocks away. It remained faint in the final fogged view. The final shader reloaded with the existing Voxy jar.
