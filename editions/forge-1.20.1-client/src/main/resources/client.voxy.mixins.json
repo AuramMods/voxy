@@ -43,6 +43,7 @@
     // "minecraft.MixinGlDebug",
     "minecraft.MixinLevelRenderer",
     "minecraft.MixinMinecraft",
+    "minecraft.MixinNativeImage",
     "minecraft.MixinRenderSystem",
     "minecraft.MixinTextureAtlas",
 //? if 1.21.1

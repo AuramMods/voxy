@@ -89,8 +89,5 @@
   "voxy.config.compat.createKinetics": "Create: distant kinetic models",
   "voxy.config.compat.createKinetics.tooltip": "Captures dedicated rotating block-entity models such as cogwheels and shafts instead of substituting ordinary blocks.",
   "voxy.config.compat.createKineticDistance": "Kinetic model distance",
-  "voxy.config.compat.distance.tooltip": "Zero follows Voxy's LOD distance; other values are maximum chunk distance.",
-  "message.voxy.block_atlas_animations_requires_gla": "The block atlas animation workaround is available only on GLA.",
-  "message.voxy.block_atlas_animations_enabled": "Block atlas animations resumed.",
-  "message.voxy.block_atlas_animations_paused": "Block atlas animations paused for this client session."
+  "voxy.config.compat.distance.tooltip": "Zero follows Voxy's LOD distance; other values are maximum chunk distance."
 }

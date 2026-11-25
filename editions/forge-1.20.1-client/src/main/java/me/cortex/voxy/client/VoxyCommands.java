@@ -21,7 +21,6 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.storage.LevelResource;
-import org.lwjgl.opengl.GL11C;
 
 import java.io.File;
 import java.io.IOException;
@@ -73,26 +72,8 @@ public class VoxyCommands {
         return LiteralArgumentBuilder.<CommandSourceStack>literal("voxy")//.requires((ctx)-> VoxyCommon.getInstance() != null)
             .then(LiteralArgumentBuilder.<CommandSourceStack>literal("reload")
                 .executes(VoxyCommands::reloadInstance))
-            .then(LiteralArgumentBuilder.<CommandSourceStack>literal("blockAtlasAnimations")
-                .then(RequiredArgumentBuilder.<CommandSourceStack, Boolean>argument("enabled", BoolArgumentType.bool())
-                    .executes(VoxyCommands::setBlockAtlasAnimations)))
             .then(imports)
             .then(debug);
-    }
-
-    private static int setBlockAtlasAnimations(CommandContext<CommandSourceStack> ctx) {
-        String glVersion = GL11C.glGetString(GL11C.GL_VERSION);
-        if (glVersion == null || !glVersion.toLowerCase(Locale.ROOT).contains("(gla ")) {
-            sendErrorToPlayer(Component.translatable("message.voxy.block_atlas_animations_requires_gla"));
-            return 0;
-        }
-
-        boolean enabled = BoolArgumentType.getBool(ctx, "enabled");
-        VoxyClient.setBlockAtlasAnimationsEnabled(enabled);
-        ctx.getSource().sendSuccess(() -> Component.translatable(enabled
-                ? "message.voxy.block_atlas_animations_enabled"
-                : "message.voxy.block_atlas_animations_paused"), false);
-        return 1;
     }
 
     private static int reloadInstance(CommandContext<CommandSourceStack> ctx) {
