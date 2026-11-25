@@ -9,13 +9,15 @@ import net.minecraft.Util;
 import net.minecraft.core.SectionPos;
 import org.lwjgl.system.MemoryUtil;
 
-/** Solid Embeddium sections submitted in the current main terrain pass. */
+/** Embeddium section coverage for the opaque and translucent terrain handoffs. */
 public final class NearTerrainCoverage {
     private static final int FADE_MS = 350;
     private static final int TIME_MASK = Integer.MAX_VALUE;
     private static final int DEPARTING = Integer.MIN_VALUE;
 
     private final LongOpenHashSet submitted = new LongOpenHashSet();
+    private LongOpenHashSet submittedTranslucent = new LongOpenHashSet();
+    private LongOpenHashSet translucentSections = new LongOpenHashSet();
     private final Long2IntOpenHashMap transitions = new Long2IntOpenHashMap();
     private GlBuffer buffer = new GlBuffer(48);
     private boolean dirty = true;
@@ -24,10 +26,15 @@ public final class NearTerrainCoverage {
 
     public void beginSolidPass() {
         this.submitted.clear();
+        this.submittedTranslucent.clear();
     }
 
     public void submit(int x, int y, int z) {
         this.submitted.add(sectionKey(x, y, z));
+    }
+
+    public void submitTranslucent(int x, int y, int z) {
+        this.submittedTranslucent.add(sectionKey(x, y, z));
     }
 
     public void beginVisibilityPass() {
@@ -81,7 +88,10 @@ public final class NearTerrainCoverage {
     }
 
     public void upload(Viewport<?> viewport, boolean enabled) {
-        if (!enabled) this.submitted.clear();
+        if (!enabled) {
+            this.submitted.clear();
+            this.submittedTranslucent.clear();
+        }
         int now = clock(Util.getMillis());
         if (!this.transitions.keySet().equals(this.submitted)) {
             this.transitions.keySet().retainAll(this.submitted);
@@ -91,46 +101,67 @@ public final class NearTerrainCoverage {
             }
             this.dirty = true;
         }
+        if (!this.translucentSections.equals(this.submittedTranslucent)) {
+            var previous = this.translucentSections;
+            this.translucentSections = this.submittedTranslucent;
+            this.submittedTranslucent = previous;
+            this.dirty = true;
+        }
         if (this.dirty) {
             this.upload();
             this.dirty = false;
         }
         viewport.nearTerrainSections = this.buffer;
         viewport.nearTerrainTime = now;
-        // Never let a pass reuse a collection from a frame where no solid draw ran.
+        // Never let a pass reuse a collection from a frame where no near draw ran.
         this.submitted.clear();
+        this.submittedTranslucent.clear();
     }
 
     private void upload() {
-        int slots = Integer.highestOneBit(Math.max(1, this.submitted.size()) * 2 - 1) << 1;
-        long bytes = (slots + 1L) * 16;
+        int slots = tableSize(this.transitions.size());
+        int translucentSlots = this.translucentSections.isEmpty() ? 0 : tableSize(this.translucentSections.size());
+        long bytes = (slots + translucentSlots + 1L) * 16;
         if (bytes > this.buffer.size()) {
             this.buffer.free();
             this.buffer = new GlBuffer(bytes);
         }
         long header = UploadStream.INSTANCE.upload(this.buffer, 0, bytes);
         MemoryUtil.memSet(header, 0, bytes);
-        int mask = slots - 1;
-        MemoryUtil.memPutInt(header, mask);
+        MemoryUtil.memPutInt(header, slots - 1);
         MemoryUtil.memPutInt(header + 4, FADE_MS);
+        MemoryUtil.memPutInt(header + 8, translucentSlots);
         long ptr = header + 16;
-        var sections = this.submitted.iterator();
-        while (sections.hasNext()) {
-            long pos = sections.nextLong();
-            int x = SectionPos.x(pos);
-            int y = SectionPos.y(pos);
-            int z = SectionPos.z(pos);
-            int slot = (x * 73856093 ^ y * 19349663 ^ z * 83492791) & mask;
-            while (MemoryUtil.memGetInt(ptr + slot * 16L + 12) != 0) {
-                slot = (slot + 1) & mask;
-            }
-            long entry = ptr + slot * 16L;
-            MemoryUtil.memPutInt(entry, x);
-            MemoryUtil.memPutInt(entry + 4, y);
-            MemoryUtil.memPutInt(entry + 8, z);
-            MemoryUtil.memPutInt(entry + 12, this.transitions.get(pos));
+        var opaque = this.transitions.long2IntEntrySet().fastIterator();
+        while (opaque.hasNext()) {
+            var section = opaque.next();
+            writeSection(ptr, slots - 1, section.getLongKey(), section.getIntValue());
+        }
+        long translucentPtr = ptr + slots * 16L;
+        var translucent = this.translucentSections.iterator();
+        while (translucent.hasNext()) {
+            writeSection(translucentPtr, translucentSlots - 1, translucent.nextLong(), 1);
         }
         UploadStream.INSTANCE.commit();
+    }
+
+    private static int tableSize(int count) {
+        return Integer.highestOneBit(Math.max(1, count) * 2 - 1) << 1;
+    }
+
+    private static void writeSection(long table, int mask, long pos, int state) {
+        int x = SectionPos.x(pos);
+        int y = SectionPos.y(pos);
+        int z = SectionPos.z(pos);
+        int slot = (x * 73856093 ^ y * 19349663 ^ z * 83492791) & mask;
+        while (MemoryUtil.memGetInt(table + slot * 16L + 12) != 0) {
+            slot = (slot + 1) & mask;
+        }
+        long entry = table + slot * 16L;
+        MemoryUtil.memPutInt(entry, x);
+        MemoryUtil.memPutInt(entry + 4, y);
+        MemoryUtil.memPutInt(entry + 8, z);
+        MemoryUtil.memPutInt(entry + 12, state);
     }
 
     public void free() {

@@ -197,18 +197,27 @@ ivec3 fragmentBlock() {
     return ivec3(floor(inside)) + baseSectionPos * 32;
 }
 
-int nearSectionState() {
-    uint mask = nearTerrainHeader.x;
-    ivec3 section = fragmentBlock() >> 4;
+int lookupNearSection(ivec3 section, uint mask, uint offset) {
     uint slot = (uint(section.x) * 73856093u ^ uint(section.y) * 19349663u ^ uint(section.z) * 83492791u) & mask;
     for (uint probes = 0u; probes <= mask; probes++) {
-        ivec4 entry = nearTerrainSections[slot];
+        ivec4 entry = nearTerrainSections[offset + slot];
         if (entry.w == 0) return 0;
         if (all(equal(entry.xyz, section))) return entry.w;
         slot = (slot + 1u) & mask;
     }
     return 0;
 }
+
+int nearSectionState() {
+    return lookupNearSection(fragmentBlock() >> 4, nearTerrainHeader.x, 0u);
+}
+
+#ifdef TRANSLUCENT
+bool hasNearTranslucentSection() {
+    uint slots = nearTerrainHeader.z;
+    return slots != 0u && lookupNearSection(fragmentBlock() >> 4, slots - 1u, nearTerrainHeader.x + 1u) != 0;
+}
+#endif
 
 float nearSectionReadiness() {
     vec3 offset = trackLocalPosition - cameraSubPos;
@@ -306,6 +315,11 @@ void main() {
     #ifdef VOXY_SHADOW_PASS
     if (nearSectionState() != 0) discard;
     #else
+    #ifdef TRANSLUCENT
+    // Glass has no near opaque depth and may be the only mesh in its section.
+    // Water still uses the shader pack's depth-aware overlap.
+    if (!useIndependentWaterBoundary() && hasNearTranslucentSection()) discard;
+    #endif
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     float nearReadiness = nearSectionReadiness();
     bool coveredByNearSection = submittedNearInterior(nearReadiness);

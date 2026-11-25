@@ -87,6 +87,8 @@ At three chunks on macOS, a fixed daylight camera viewed a white concrete panel 
 
 Solid terrain uses a 350 ms transition in either direction. When a previously drawn Embeddium section crosses its visibility distance, Voxy lets that section stay in the draw list for the fade as long as its mesh remains resident and stays within one extra section of the distance limit. A camera reversal continues from the current blend weight. Sections that unload immediately fall back to available Voxy terrain.
 
+Glass hands off to Embeddium as soon as the visible section has a drawable translucent mesh. Voxy checks that pass's own meshes because a glass-only roof may have no opaque depth. Water continues to use its depth-aware overlap. AuramBliss's Voxy terrain pass gives lava the same hardcoded emission value as the regular terrain pass when that emission mode is enabled.
+
 The Voxy model atlas includes the complete chain down to one texel per baked face. Minification blends texels and mip levels inside each face, while magnification retains the pixel-art texture. Base alpha tests and tint flags still read exact atlas texels. The extra holes used by the balanced leaf mode fade out as their texels become subpixel.
 
 ## Water depth, cloud edges, and shadow samples
