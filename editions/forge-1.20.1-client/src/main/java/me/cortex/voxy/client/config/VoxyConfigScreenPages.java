@@ -39,7 +39,8 @@ public abstract class VoxyConfigScreenPages {
         return List.of(
                 generalPage(storage),
                 renderingPage(storage),
-                compatibilityPage(storage));
+                compatibilityPage(storage),
+                VoxyServerConfigPage.create());
     }
 
     private static OptionPage generalPage(VoxyConfig storage) {

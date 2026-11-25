@@ -1,5 +1,6 @@
 package me.cortex.voxy.server;
 
+import com.electronwill.nightconfig.core.CommentedConfig;
 import me.cortex.voxy.common.config.section.LodSectionStorage;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.network.LodChannel;
@@ -28,8 +29,8 @@ import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 @Mod.EventBusSubscriber(modid = "voxy", bus = Mod.EventBusSubscriber.Bus.FORGE)
@@ -42,7 +43,7 @@ public final class ServerLodService implements AutoCloseable {
     private final Path root;
     final UUID worldId;
     private final Map<ResourceKey<Level>, Dimension> worlds = new HashMap<>();
-    private final ExecutorService worker;
+    private final ThreadPoolExecutor worker;
     private final ServerLodGenerator generator;
     private final ServerLodEdits edits;
     private final ServerLodStreams streams;
@@ -54,7 +55,8 @@ public final class ServerLodService implements AutoCloseable {
         var path = Files.createDirectories(this.root.resolve("voxy-server")).resolve("world-id");
         if (Files.notExists(path)) Files.writeString(path, UUID.randomUUID().toString());
         this.worldId = UUID.fromString(Files.readString(path).trim());
-        this.worker = Executors.newFixedThreadPool(ServerVoxyConfig.CHUNK_JOBS.get(), job -> {
+        int jobs = ServerVoxyConfig.chunkJobs(false);
+        this.worker = new ThreadPoolExecutor(jobs, jobs, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), job -> {
             var thread = new Thread(job, "Voxy server storage");
             thread.setDaemon(true);
             return thread;
@@ -89,6 +91,13 @@ public final class ServerLodService implements AutoCloseable {
     static ServerLodService forServer(MinecraftServer server) {
         var service = current;
         return service != null && service.server == server ? service : null;
+    }
+
+    public static void applyLocalConfig(MinecraftServer server, CommentedConfig config) {
+        if (server.isDedicatedServer()) return;
+        server.execute(() -> {
+            if (forServer(server) != null) ServerVoxyConfig.apply(config);
+        });
     }
 
     public static void blockChanged(ServerLevel level, BlockPos position) {
@@ -148,7 +157,10 @@ public final class ServerLodService implements AutoCloseable {
         var service = forServer(event.getServer());
         if (service == null || event.phase != TickEvent.Phase.END) return;
         service.edits.tick(event.getServer().getTickCount());
-        service.generator.tick();
+        boolean playersOnline = !event.getServer().getPlayerList().getPlayers().isEmpty();
+        int jobs = ServerVoxyConfig.chunkJobs(playersOnline);
+        service.resizeWorkers(jobs);
+        service.generator.tick(playersOnline, jobs);
         service.streams.tick();
         long now = System.nanoTime();
         long elapsed = now - service.lastReport;
@@ -161,6 +173,14 @@ public final class ServerLodService implements AutoCloseable {
                     progress.generating().isEmpty() ? "idle" : progress.generating(), progress.tickets()));
             service.lastReport = now;
         }
+    }
+
+    private void resizeWorkers(int jobs) {
+        int current = this.worker.getMaximumPoolSize();
+        if (current == jobs) return;
+        if (jobs > current) this.worker.setMaximumPoolSize(jobs);
+        this.worker.setCorePoolSize(jobs);
+        if (jobs < current) this.worker.setMaximumPoolSize(jobs);
     }
 
     @SubscribeEvent
