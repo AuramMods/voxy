@@ -6,19 +6,24 @@ The LOD channel is optional. A Voxy client can still ingest terrain from a serve
 
 ## Server configuration
 
-Forge creates `<world>/serverconfig/voxy-server.toml`. Restart the server after changing the file. The options are independent of `view-distance` and `simulation-distance` in `server.properties`.
+The same generator runs in singleplayer and on dedicated servers. Open **Video Settings → Voxy Server** in Embeddium to change the settings. Applying changes updates the open singleplayer world and saves a portable template at `defaultconfigs/voxy-server.toml` in the Minecraft instance.
+
+Copy that template to `<world>/serverconfig/voxy-server.toml` for an existing dedicated-server world, then restart the server. Put the file in the server's `defaultconfigs/` directory to use it for new worlds. These settings are independent of `view-distance` and `simulation-distance` in `server.properties`.
 
 | Option | Default | Controls |
 | --- | --- | --- |
 | `distantGeneration` | `true` | Generate missing chunks. Turn this off to stream cached LODs and backfill chunks Minecraft has already saved. |
 | `radiusChunks` | `256` | Horizontal radius in Minecraft chunks for server generation and streaming. The client rendering cutoff also defaults to 256 chunks and can be lowered locally. |
-| `chunkJobs` | `4` | Global maximum number of in-flight generation and backfill jobs. Minecraft manages the worldgen threads and may load dependency chunks for each ticket. |
+| `chunkJobs` | `4` | Maximum concurrent Voxy generation and backfill jobs with players online, including the singleplayer host. Existing configurations keep this value. |
+| `idleChunkJobs` | `4` | Maximum concurrent Voxy generation and backfill jobs when no players are online. |
 | `spawnDimensions` | `['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end']` | Ordered list of dimensions with spawn anchors. IDs for missing dimensions can stay in the list. |
 | `spawnAnchors` | `[]` | Optional overrides in `dimension=x,z` form using block coordinates. The Overworld uses its saved spawn and other dimensions default to X/Z `0,0`. |
 
 With players online, the generator considers only dimensions with at least one player. Within an occupied dimension, every player is an anchor. A listed dimension also contributes its spawn anchor. The closest eligible missing chunk across those anchors wins the next ticket, with deterministic ties.
 
 When nobody is online, Voxy fills the spawn radius of the first available dimension with unfinished coverage. It completes that dimension before issuing a ticket for the next one. The console reports chunks per second every 60 seconds, including newly generated and reused chunks, dimensions that were generating, and active ticket count. Start a disposable server with `-Dvoxy.traceServerLodJobs=true` to log individual ticket acquisitions and releases.
+
+The server switches job limits as players join or leave. Previously started work can finish when the limit drops. Minecraft manages the world-generation threads and can load dependency chunks for each Voxy ticket.
 
 ## Persistence and reconnects
 

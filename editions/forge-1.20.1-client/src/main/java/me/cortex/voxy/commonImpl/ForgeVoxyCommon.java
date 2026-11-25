@@ -11,7 +11,7 @@ import net.minecraftforge.fml.config.ModConfig;
 public class ForgeVoxyCommon extends VoxyCommon {
     public ForgeVoxyCommon() {
         LodChannel.register();
-        ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, ServerVoxyConfig.SPEC, "voxy-server.toml");
+        ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, ServerVoxyConfig.SPEC, ServerVoxyConfig.FILE_NAME);
         com.mojang.logging.LogUtils.getLogger().info("Initializing Voxy Common");
     }
 }

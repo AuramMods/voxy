@@ -101,7 +101,7 @@ final class ServerLodGenerator {
         this.generationOn = ServerVoxyConfig.GENERATE.get();
     }
 
-    void tick() {
+    void tick(boolean playersOnline, int limit) {
         boolean enabled = ServerVoxyConfig.GENERATE.get();
         if (this.generationOn != enabled) {
             this.generationOn = enabled;
@@ -110,7 +110,6 @@ final class ServerLodGenerator {
             this.examined.clear();
         }
 
-        boolean playersOnline = !this.service.server().getPlayerList().getPlayers().isEmpty();
         if (this.hadPlayers != playersOnline) {
             this.hadPlayers = playersOnline;
             this.cursors.clear();
@@ -136,14 +135,13 @@ final class ServerLodGenerator {
             this.examined.clear();
         }
 
-        int limit = ServerVoxyConfig.CHUNK_JOBS.get();
         int[] visits = {128};
         for (int count = 0; count < limit && this.active.size() < limit; count++) {
             var next = this.nextCandidate(anchors, visits);
             if (next == null) break;
             this.scheduleNext(next);
         }
-        this.issueTickets(anchors, visits);
+        this.issueTickets(anchors, visits, limit);
     }
 
     private Candidate nextCandidate(Set<Anchor> anchors, int[] visits) {
@@ -161,18 +159,20 @@ final class ServerLodGenerator {
         this.schedule(candidate, retry == null ? 0 : retry.attempts());
     }
 
-    private void issueTickets(Set<Anchor> anchors, int[] visits) {
+    private void issueTickets(Set<Anchor> anchors, int[] visits, int limit) {
         if (!this.generationOn || visits[0] < 0) return;
+        long running = this.active.values().stream().filter(job -> job.ticket != null || job.write != null).count();
         var ready = this.active.entrySet().stream()
                 .filter(entry -> entry.getValue().write == null && entry.getValue().ticket == null)
                 .map(entry -> priorityAt(anchors, entry.getKey()))
                 .filter(java.util.Objects::nonNull)
                 .sorted(PRIORITY)
                 .toList();
-        if (ready.isEmpty()) return;
+        if (ready.isEmpty() || running >= limit) return;
         var frontier = this.nextCandidate(anchors, visits);
         if (visits[0] < 0) return;
         for (var candidate : ready) {
+            if (running >= limit) break;
             Job job = this.active.get(candidate.column());
             if (frontier != null && PRIORITY.compare(frontier, candidate) < 0) {
                 // A new anchor can expose closer work while all slots are occupied by saved-chunk lookups.
@@ -188,6 +188,7 @@ final class ServerLodGenerator {
             var level = candidate.anchor().level();
             try {
                 job.ticket = new ServerChunkTicket(level.getChunkSource(), candidate.position());
+                running++;
                 this.workedDimensions.add(level.dimension().location());
                 if (TRACE) Logger.info("Issued Voxy chunk ticket " + candidate.column()
                         + " at distance squared " + candidate.distance());
