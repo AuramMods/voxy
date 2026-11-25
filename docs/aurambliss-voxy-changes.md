@@ -22,3 +22,7 @@ The Mac smoke run verified the original 0.8-scale TAA preset, colored distant la
 The cloud shadow pass reconstructs Voxy pixels from Voxy's opaque depth and inverse projection. It applies the current render scale and TAA offset before converting the position to world space. Previously the pass sampled cloud shadows at Minecraft's far-plane position, which moved the shadow pattern over distant geometry as the camera turned.
 
 In a copy of the Auram world, the same two camera angles showed dark patches on a distant rock face with the old shader. Reloading the patched shader removed those patches while retaining the rock face and nearby terrain. This change takes effect on reload in Oculus.
+
+## Bright ice and glass at night
+
+The Voxy translucent pass referenced an undefined `debug_ALBEDO` mode. GLSL evaluated it as zero, so the branch also ran in the default `debug_OFF` mode and overwrote the lit color with the raw texture color. Removing the unused branch restores the forward lighting and reflection calculation for distant translucent blocks, including water. The midnight smoke fixture showed normal lighting on the ice after an Oculus reload.
