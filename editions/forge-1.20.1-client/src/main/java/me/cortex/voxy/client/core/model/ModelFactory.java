@@ -28,6 +28,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ColorResolver;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
@@ -153,7 +154,7 @@ public class ModelFactory {
         this.customBlockStateIdMapping = mapping;
     }
 
-    private static final record BlockBake(int blockId, BlockState state) {
+    private record BlockBake(int blockId, BlockState state, int containedFluidBlockId) {
     }
 
     // ---- 模型登记与异步上传 -------------------------------------------
@@ -172,24 +173,10 @@ public class ModelFactory {
             blockState = sb.getModelState().getBlock().withPropertiesOf(blockState);
         }
 
-        //We do this first so that it is always guarenteed that fluid models are ordered before the block models
-
-        //Before we enqueue the baking of this blockstate, we must check if it has a fluid state associated with it
-        // if it does, we must ensure that it is (effectivly) baked BEFORE we bake this blockstate
-        boolean isFluid = blockState.getBlock() instanceof LiquidBlock;
-        if ((!isFluid) && (!blockState.getFluidState().isEmpty())) {
-            //Insert into the fluid LUT
-            var fluidState = blockState.getFluidState().createLegacyBlock();
-
-            int fluidStateId = this.mapper.getIdForBlockState(fluidState);
-
-            if (this.idMappings[fluidStateId] == -1) {
-                //Dont have to check for inflight as that is done recursively :p
-
-                //This is a hack but does work :tm: due to how the download stream is setup
-                // it should enforce that the fluid state is processed before our blockstate
-                addEntry(fluidStateId);
-            }
+        // Queue the contained fluid model before any block that uses it.
+        int containedFluidBlockId = this.getContainedFluidBlockId(blockState);
+        if (containedFluidBlockId != -1 && this.idMappings[containedFluidBlockId] == -1) {
+            addEntry(containedFluidBlockId);
         }
 
         //We are (probably) going to be baking the block id
@@ -211,12 +198,21 @@ public class ModelFactory {
             if (this.idMappings[blockId] != -1) {
                 return false;
             }
-            this.bakeQueue.add(new BlockBake(blockId, blockState));
+            this.bakeQueue.add(new BlockBake(blockId, blockState, containedFluidBlockId));
             return true;
 
         } finally {
             this.blockStatesInFlightLock.unlock();
         }
+    }
+
+    private int getContainedFluidBlockId(BlockState state) {
+        FluidState fluid = state.getFluidState();
+        if (fluid.isEmpty() || state.getBlock() instanceof LiquidBlock) return -1;
+
+        // A full occlusion cube hides its contained water in Minecraft's fluid renderer.
+        if (fluid.is(FluidTags.WATER) && state.isSolidRender(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)) return -1;
+        return this.mapper.getIdForBlockState(fluid.createLegacyBlock());
     }
 
     private boolean processModelResult() {
@@ -292,7 +288,7 @@ public class ModelFactory {
 
 
         boolean centeredGroundCross = (flags & SoftwareModelTextureBakery.FLAG_CENTERED_GROUND_CROSS) != 0;
-        var bakeResult = this.processTextureBakeResult(bake.blockId, bake.state, textureData,
+        var bakeResult = this.processTextureBakeResult(bake, textureData,
                 isShaded, hasDarkenedTextures, layer, centeredGroundCross);
         if (bakeResult!=null) {
             this.uploadResults.add(bakeResult);
@@ -407,10 +403,12 @@ public class ModelFactory {
 
     // ---- 纹理元数据与染色 ---------------------------------------------
 
-    private ModelBakeResultUpload processTextureBakeResult(int blockId, BlockState blockState,
+    private ModelBakeResultUpload processTextureBakeResult(BlockBake bake,
                                                             ColourDepthTextureData[] textureData,
                                                             boolean isShaded, boolean darkenedTinting,
                                                             RenderType layer, boolean centeredGroundCross) {
+        int blockId = bake.blockId;
+        BlockState blockState = bake.state;
         if (this.idMappings[blockId] != -1) {
             //This should be impossible to reach as it means that multiple bakes for the same blockId happened and where inflight at the same time!
             throw new IllegalStateException("Block id already added: " + blockId + " for state: " + blockState);
@@ -438,13 +436,8 @@ public class ModelFactory {
 
         int clientFluidStateId = -1;
 
-        if ((!isFluid) && (!blockState.getFluidState().isEmpty())) {
-            //Insert into the fluid LUT
-            var fluidState = blockState.getFluidState().createLegacyBlock();
-
-            int fluidStateId = this.mapper.getIdForBlockState(fluidState);
-
-            clientFluidStateId = this.idMappings[fluidStateId];
+        if (bake.containedFluidBlockId != -1) {
+            clientFluidStateId = this.idMappings[bake.containedFluidBlockId];
             if (clientFluidStateId == -1) {
                 throw new IllegalStateException("Block has a fluid state but fluid state is not already baked!!!");
             }
@@ -517,8 +510,7 @@ public class ModelFactory {
         //TODO: implement;
         // TODO: if it has a constant colour instead... idk why (apparently for things like spruce leaves)?? but premultiply the texture data by the constant colour
 
-        //If it contains fluid but isnt a fluid
-        if ((!isFluid) && (!blockState.getFluidState().isEmpty()) && clientFluidStateId != -1) {
+        if (clientFluidStateId != -1) {
 
             //Or it with the fluid state biome dependency
             isBiomeColourDependent |= ModelQueries.isBiomeColoured(this.getModelMetadataFromClientId(clientFluidStateId));
@@ -577,7 +569,7 @@ public class ModelFactory {
         metadata |= isBiomeColourDependent?1:0;
         metadata |= layer == RenderType.translucent()?2:0;
         metadata |= needsDoubleSidedQuads?4:0;
-        metadata |= ((!isFluid) && !blockState.getFluidState().isEmpty())?8:0;//Has a fluid state accosiacted with it and is not itself a fluid
+        metadata |= clientFluidStateId != -1 ? 8 : 0;//Has a renderable contained fluid
         metadata |= isFluid?16:0;//Is a fluid
 
         metadata |= cullsSame?32:0;
