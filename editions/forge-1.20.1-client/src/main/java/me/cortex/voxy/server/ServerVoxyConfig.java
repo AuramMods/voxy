@@ -18,7 +18,7 @@ public final class ServerVoxyConfig {
         GENERATE = builder.comment("Generate missing Minecraft terrain. Saved chunks can always be converted to LODs.")
                 .define("distantGeneration", true);
         RADIUS = builder.comment("Horizontal generation and streaming radius in Minecraft chunks.")
-                .defineInRange("radiusChunks", 128, 1, 2048);
+                .defineInRange("radiusChunks", 256, 1, 2048);
         CHUNK_JOBS = builder.comment("Maximum number of in-flight Voxy chunk jobs across all dimensions.")
                 .defineInRange("chunkJobs", 4, 1, 64);
         SPAWN_DIMENSIONS = builder.comment("Ordered spawn generation dimensions. Absent dimensions are skipped.")

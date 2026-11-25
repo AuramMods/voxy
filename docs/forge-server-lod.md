@@ -11,7 +11,7 @@ Forge creates `<world>/serverconfig/voxy-server.toml`. Restart the server after 
 | Option | Default | Controls |
 | --- | --- | --- |
 | `distantGeneration` | `true` | Generate missing chunks. Turn this off to stream cached LODs and backfill chunks Minecraft has already saved. |
-| `radiusChunks` | `128` | Horizontal radius in Minecraft chunks for server generation and streaming. A client can lower its own rendering cutoff. |
+| `radiusChunks` | `256` | Horizontal radius in Minecraft chunks for server generation and streaming. The client rendering cutoff also defaults to 256 chunks and can be lowered locally. |
 | `chunkJobs` | `4` | Global maximum number of in-flight generation and backfill jobs. Minecraft manages the worldgen threads and may load dependency chunks for each ticket. |
 | `spawnDimensions` | `['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end']` | Ordered list of dimensions with spawn anchors. IDs for missing dimensions can stay in the list. |
 | `spawnAnchors` | `[]` | Optional overrides in `dimension=x,z` form using block coordinates. The Overworld uses its saved spawn and other dimensions default to X/Z `0,0`. |
