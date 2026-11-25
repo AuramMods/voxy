@@ -133,9 +133,11 @@ void setupScreenspace(in UnpackedNode node) {
 
 
     #ifdef TAA
-    vec2 taaValue = getTAA()*0.5f;//Note! this might be need tobe *0.5f
-    _minBB.xy += taaValue;
-    _maxBB.xy += taaValue;
+    if (!shadowPass) {
+        vec2 taaValue = getTAA() * 0.5f;
+        _minBB.xy += taaValue;
+        _maxBB.xy += taaValue;
+    }
     #endif
 
     _minBB = clamp(_minBB, vec3(0), vec3(1));

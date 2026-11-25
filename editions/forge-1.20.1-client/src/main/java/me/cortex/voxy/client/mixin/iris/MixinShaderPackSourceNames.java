@@ -6,6 +6,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.irisshaders.iris.shaderpack.include.ShaderPackSourceNames;
 import net.irisshaders.iris.shaderpack.include.AbsolutePackPath;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -16,17 +17,16 @@ import java.nio.file.Path;
 
 @Mixin(value = ShaderPackSourceNames.class, remap = false)
 public class MixinShaderPackSourceNames {
-    private static final String[] VOXY_PROGRAM_FILES = {
-            "voxy.json", "voxy_opaque.glsl", "voxy_translucent.glsl", "voxy_taa.glsl"
-    };
+    @Unique
+    private static String[] voxy$programFiles() {
+        // Oculus calls this while initializing ShaderPackSourceNames.
+        return new String[] {"voxy.json", "voxy_opaque.glsl", "voxy_translucent.glsl", "voxy_taa.glsl", "voxy_shadow.glsl"};
+    }
 
     @WrapOperation(method = "findPotentialStarts", at = @At(value = "INVOKE", target = "Lcom/google/common/collect/ImmutableList;builder()Lcom/google/common/collect/ImmutableList$Builder;"))
     private static ImmutableList.Builder<String> voxy$injectVoxyShaderPatch(Operation<ImmutableList.Builder<String>> original){
         var builder = original.call();
-        builder.add("voxy.json");
-        builder.add("voxy_opaque.glsl");
-        builder.add("voxy_translucent.glsl");
-        builder.add("voxy_taa.glsl");
+        builder.add(voxy$programFiles());
         return builder;
     }
 
@@ -43,7 +43,7 @@ public class MixinShaderPackSourceNames {
         }
 
         boolean found = false;
-        for (String file : VOXY_PROGRAM_FILES) {
+        for (String file : voxy$programFiles()) {
             if (Files.isRegularFile(programPath.resolve(file))) {
                 starts.add(programDirectory.resolve(file));
                 found = true;

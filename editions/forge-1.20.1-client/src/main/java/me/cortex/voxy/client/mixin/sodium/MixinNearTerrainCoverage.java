@@ -29,12 +29,13 @@ public class MixinNearTerrainCoverage {
                                      ChunkRenderListIterable lists, TerrainRenderPass pass,
                                      CameraTransform camera, CallbackInfo ci) {
         voxy$solidPass = null;
-        if (pass != DefaultTerrainRenderPasses.SOLID || IrisUtil.irisShadowActive()) return;
+        boolean shadow = IrisUtil.irisShadowActive();
+        if (shadow ? pass == DefaultTerrainRenderPasses.TRANSLUCENT : pass != DefaultTerrainRenderPasses.SOLID) return;
         var renderer = ((IGetVoxyRenderSystem) Minecraft.getInstance().levelRenderer).voxy$getRenderSystem();
-        if (renderer != null) {
-            voxy$solidPass = renderer.nearTerrainCoverage;
-            voxy$solidPass.beginSolidPass();
-        }
+        if (renderer == null) return;
+
+        voxy$solidPass = shadow ? renderer.getShadowTerrainCoverage() : renderer.nearTerrainCoverage;
+        if (!shadow) voxy$solidPass.beginSolidPass();
     }
 
     @Inject(method = "render", at = @At("RETURN"))

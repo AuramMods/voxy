@@ -22,6 +22,7 @@
     "iris.MixinPackRenderTargetDirectives",
     "iris.MixinProgramSet",
     "iris.MixinShaderPackSourceNames",
+    "iris.MixinShadowRenderer",
     "iris.MixinStandardMacros",
     // "minecraft.MixinBlockableEventLoop",
     "minecraft.MixinClientChunkCache",

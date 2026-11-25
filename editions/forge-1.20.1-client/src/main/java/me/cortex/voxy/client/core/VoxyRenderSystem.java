@@ -11,6 +11,7 @@ import me.cortex.voxy.client.VoxyClient;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.client.core.gl.GlBuffer;
+import me.cortex.voxy.client.core.gl.GlFramebuffer;
 import me.cortex.voxy.client.core.gl.GlTexture;
 import me.cortex.voxy.client.core.model.ModelBakerySubsystem;
 import me.cortex.voxy.client.core.model.ModelStore;
@@ -25,6 +26,8 @@ import me.cortex.voxy.client.core.rendering.hierachical.NodeCleaner;
 import me.cortex.voxy.client.core.rendering.section.IUsesMeshlets;
 import me.cortex.voxy.client.core.rendering.section.backend.AbstractSectionRenderer;
 import me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICSectionRenderer;
+import me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICViewport;
+import me.cortex.voxy.client.core.rendering.ShadowRenderState;
 import me.cortex.voxy.client.core.rendering.section.geometry.BasicSectionGeometryData;
 import me.cortex.voxy.client.core.rendering.section.geometry.IGeometryData;
 import me.cortex.voxy.client.core.rendering.util.DownloadStream;
@@ -57,6 +60,9 @@ import static org.lwjgl.opengl.GL30.glGetIntegeri;
 import static org.lwjgl.opengl.GL30C.*;
 import static org.lwjgl.opengl.GL33.glBindSampler;
 import static org.lwjgl.opengl.GL43.GL_SHADER_STORAGE_BUFFER;
+import static org.lwjgl.opengl.GL45C.glNamedFramebufferDrawBuffer;
+import static org.lwjgl.opengl.GL45C.glNamedFramebufferReadBuffer;
+import static org.lwjgl.opengl.GL45C.glNamedFramebufferTexture;
 import static org.lwjgl.opengl.GL43C.GL_SHADER_STORAGE_BUFFER_BINDING;
 
 public class VoxyRenderSystem {
@@ -75,6 +81,9 @@ public class VoxyRenderSystem {
 
     private final RenderDistanceTracker renderDistanceTracker;
     public final NearTerrainCoverage nearTerrainCoverage;
+    private final NearTerrainCoverage shadowTerrainCoverage;
+    private GlFramebuffer shadowFramebuffer;
+    private int shadowDepthTexture;
 
     private final ViewportSelector<?> viewportSelector;
 
@@ -196,6 +205,8 @@ public class VoxyRenderSystem {
             }
 
             this.nearTerrainCoverage = new NearTerrainCoverage();
+            this.shadowTerrainCoverage = this.pipeline instanceof IrisVoxyRenderPipeline iris && iris.shadowPositionPatch() != null
+                    ? new NearTerrainCoverage() : null;
 
             Logger.info("Voxy render system created with " + this.geometryData.getMaxCapacity() + " geometry capacity, using pipeline '" + this.pipeline.getClass().getSimpleName() + "' with renderer '" + sectionRenderer.getClass().getSimpleName() + "'");
 
@@ -267,6 +278,43 @@ public class VoxyRenderSystem {
         }
 
         return viewport;
+    }
+
+    public NearTerrainCoverage getShadowTerrainCoverage() {
+        return this.shadowTerrainCoverage;
+    }
+
+    public void renderShadowCasters(Matrix4fc projection, Matrix4fc modelView, double cameraX, double cameraY,
+                                    double cameraZ, int depthTexture, int resolution) {
+        if (this.shadowTerrainCoverage == null) return;
+        if (visionEffectPresent()) return;
+        if (!(this.pipeline.sectionRenderer instanceof MDICSectionRenderer renderer)
+                || !(this.viewportSelector.getViewport() instanceof MDICViewport viewport)) return;
+
+        // Bliss's nonlinear warp can admit casters beyond the undistorted XY
+        // frustum. The separate clip-space Z scale matches its depth compression.
+        var bounds = new Matrix4f(projection).scaleLocal(0.25f, 0.25f, 1.0f / 6.0f);
+        viewport.shadowCasterRange = 768.0f;
+        viewport.setVanillaProjection(projection).setProjection(bounds).setModelView(modelView)
+                .setCamera(cameraX, cameraY, cameraZ).setScreenSize(resolution, resolution).update();
+
+        ShadowRenderState.run(() -> {
+            if (this.shadowFramebuffer == null) {
+                this.shadowFramebuffer = new GlFramebuffer().name("Voxy Oculus shadow depth");
+                glNamedFramebufferDrawBuffer(this.shadowFramebuffer.id, GL_NONE);
+                glNamedFramebufferReadBuffer(this.shadowFramebuffer.id, GL_NONE);
+            }
+            if (this.shadowDepthTexture != depthTexture) {
+                glNamedFramebufferTexture(this.shadowFramebuffer.id, GL_DEPTH_ATTACHMENT, depthTexture, 0);
+                this.shadowFramebuffer.verify();
+                this.shadowDepthTexture = depthTexture;
+            }
+            this.shadowTerrainCoverage.upload(viewport, true);
+            this.traversal.doTraversal(viewport);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, this.shadowFramebuffer.id);
+            glViewport(0, 0, resolution, resolution);
+            renderer.renderShadowCasters(viewport);
+        });
     }
 
     public void renderOpaque(Viewport<?> viewport) {
@@ -557,6 +605,8 @@ public class VoxyRenderSystem {
             if (this.modelService != null) cleanup.run(this.modelService::shutdown);
             interrupted |= Thread.interrupted();
             cleanup.run(() -> DownloadStream.INSTANCE.flushWaitClear());
+            if (this.shadowFramebuffer != null) cleanup.run(this.shadowFramebuffer::free);
+            if (this.shadowTerrainCoverage != null) cleanup.run(this.shadowTerrainCoverage::free);
             if (this.nearTerrainCoverage != null) cleanup.run(this.nearTerrainCoverage::free);
             if (this.viewportSelector != null) cleanup.run(this.viewportSelector::free);
             if (this.pipeline != null) cleanup.run(this.pipeline::free);

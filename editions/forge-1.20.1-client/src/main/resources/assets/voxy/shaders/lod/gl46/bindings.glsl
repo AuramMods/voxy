@@ -7,7 +7,7 @@ layout(binding = 0, std140) uniform SceneUniform {
     float nearInteriorRadius;
     uint nearTerrainTime;
     float streamedTerrainRadiusSquared;
-    float _scenePadding;
+    uint shadowSectionLimit;
     vec4 worldCurveData;
     vec4 trackReplacement;
 };

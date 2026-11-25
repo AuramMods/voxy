@@ -46,6 +46,7 @@ public class IrisVoxyRenderPipelineData {
     public final int[] translucentDrawTargets;
     private final String opaquePatch;
     private final String translucentPatch;
+    public final String shadowPositionPatch;
     private final StructLayout uniforms;
     private final Runnable blendingSetup;
     private final ImageSet imageSet;
@@ -64,6 +65,7 @@ public class IrisVoxyRenderPipelineData {
         this.translucentDrawTargets = translucentDrawTargets;
         this.opaquePatch = patch.getPatchOpaqueSource();
         this.translucentPatch = patch.getPatchTranslucentSource();
+        this.shadowPositionPatch = patch.getShadowPatchSource();
         this.uniforms = uniformSet;
         this.blendingSetup = blendingSetup;
         this.imageSet = imageSet;

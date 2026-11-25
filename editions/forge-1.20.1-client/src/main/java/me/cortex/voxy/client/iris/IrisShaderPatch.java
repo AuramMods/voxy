@@ -179,6 +179,7 @@ public class IrisShaderPatch {
         @JsonAdapter(BlendStateDeserializer.class)
         public Int2ObjectOpenHashMap<BlendState> blending;
         public String taaOffset;
+        public String shadowPatchData;
         public boolean excludeLodsFromVanillaDepth;
         public float[] renderScale;
         public boolean useViewportDims;
@@ -246,6 +247,10 @@ public class IrisShaderPatch {
     public String getPatchTranslucentSource() {
         return this.patchData.translucentPatchData;
     }
+    public String getShadowPatchSource() {
+        return this.patchData.shadowPatchData;
+    }
+
     public String getTAAShift() {
         return this.patchData.taaOffset;// == null?"{return vec2(0.0);}":this.patchData.taaOffset;
     }
@@ -411,6 +416,10 @@ public class IrisShaderPatch {
                 if (taa != null) {
                     Logger.info("External taa shader patch applied");
                     patchData.taaOffset = taa;
+                }
+                var shadow = sourceProvider.apply(patchDirectory.resolve("voxy_shadow.glsl"));
+                if (shadow != null && !shadow.isBlank()) {
+                    patchData.shadowPatchData = shadow;
                 }
             }
 

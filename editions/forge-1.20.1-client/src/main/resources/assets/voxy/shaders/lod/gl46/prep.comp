@@ -8,7 +8,8 @@ layout(local_size_x = 1) in;
 #import <voxy:lod/gl46/bindings.glsl>
 
 void main() {
-    cmdGenDispatchX = ((sectionCount+127)/128);
+    uint inputCount = shadowSectionLimit == 0u ? sectionCount : min(sectionCount, shadowSectionLimit);
+    cmdGenDispatchX = (inputCount + 127u) / 128u;
     cmdGenDispatchY = 1;
     cmdGenDispatchZ = 1;
 

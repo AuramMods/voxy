@@ -34,7 +34,9 @@ layout(location = 7) in flat uint quadDebug;
 
 
 #ifndef PATCHED_SHADER
+#ifndef VOXY_SHADOW_PASS
 layout(location = 0) out vec4 outColour;
+#endif
 #else
 
 //Bind the model buffer and import the model system as we need it
@@ -195,24 +197,28 @@ ivec3 fragmentBlock() {
     return ivec3(floor(inside)) + baseSectionPos * 32;
 }
 
-float nearSectionReadiness() {
-    vec3 offset = trackLocalPosition - cameraSubPos;
-    float overlap = nearInteriorRadius + 24.0;
-    if (dot(offset.xz, offset.xz) >= overlap * overlap) return -1.0;
+int nearSectionState() {
     uint mask = nearTerrainHeader.x;
     ivec3 section = fragmentBlock() >> 4;
     uint slot = (uint(section.x) * 73856093u ^ uint(section.y) * 19349663u ^ uint(section.z) * 83492791u) & mask;
     for (uint probes = 0u; probes <= mask; probes++) {
         ivec4 entry = nearTerrainSections[slot];
-        if (entry.w == 0) return -1.0;
-        if (all(equal(entry.xyz, section))) {
-            uint elapsed = (nearTerrainTime - uint(entry.w)) & 0x7fffffffu;
-            float progress = smoothstep(0.0, float(nearTerrainHeader.y), float(elapsed));
-            return entry.w < 0 ? 1.0 - progress : progress;
-        }
+        if (entry.w == 0) return 0;
+        if (all(equal(entry.xyz, section))) return entry.w;
         slot = (slot + 1u) & mask;
     }
-    return -1.0;
+    return 0;
+}
+
+float nearSectionReadiness() {
+    vec3 offset = trackLocalPosition - cameraSubPos;
+    float overlap = nearInteriorRadius + 24.0;
+    if (dot(offset.xz, offset.xz) >= overlap * overlap) return -1.0;
+    int state = nearSectionState();
+    if (state == 0) return -1.0;
+    uint elapsed = (nearTerrainTime - uint(state)) & 0x7fffffffu;
+    float progress = smoothstep(0.0, float(nearTerrainHeader.y), float(elapsed));
+    return state < 0 ? 1.0 - progress : progress;
 }
 
 bool submittedNearInterior(float readiness) {
@@ -297,6 +303,9 @@ void main() {
         if (dot(offset, offset) > streamedTerrainRadiusSquared) discard;
     }
 
+    #ifdef VOXY_SHADOW_PASS
+    if (nearSectionState() != 0) discard;
+    #else
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     float nearReadiness = nearSectionReadiness();
     bool coveredByNearSection = submittedNearInterior(nearReadiness);
@@ -323,6 +332,8 @@ void main() {
     }
     #endif
 
+
+    #endif
 
     //Also, small quad is really fking over the mipping level somehow
     #ifndef TRANSLUCENT
@@ -351,7 +362,9 @@ void main() {
     }
     #endif
 
-    #ifndef PATCHED_SHADER
+    #ifdef VOXY_SHADOW_PASS
+    return;
+    #elif !defined PATCHED_SHADER
     colour = computeColour(texPos, colour);
     outColour = colour;
 

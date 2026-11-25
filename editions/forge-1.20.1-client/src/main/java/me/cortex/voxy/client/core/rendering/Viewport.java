@@ -13,6 +13,11 @@ public abstract class Viewport <A extends Viewport<A>> {
     public final HiZBuffer hiZBuffer;
     public GlBuffer nearTerrainSections;
     public int nearTerrainTime;
+    public float shadowCasterRange;
+
+    public boolean isShadowPass() {
+        return this.shadowCasterRange > 0.0f;
+    }
 
     private static final Field planesField;
     static {

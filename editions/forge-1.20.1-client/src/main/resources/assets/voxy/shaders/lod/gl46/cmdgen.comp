@@ -49,7 +49,9 @@ void writeCmd(uint idx, uint instance, uint offset, uint quadCount) {
 }
 
 void main() {
-    if (gl_GlobalInvocationID.x >= sectionCount) {
+    bool shadowPass = shadowSectionLimit != 0u;
+    uint inputCount = shadowPass ? min(sectionCount, shadowSectionLimit) : sectionCount;
+    if (gl_GlobalInvocationID.x >= inputCount) {
         return;
     }
     uint sectionId = indirectLookup[gl_GlobalInvocationID.x];
@@ -60,11 +62,11 @@ void main() {
     vec3 cornerPos = vec3(((ipos<<detail)-baseSectionPos)<<5)-cameraSubPos;
 
 
-    uint dat = visibilityData[sectionId];
+    uint dat = shadowPass ? 0u : visibilityData[sectionId];
 
     //if the section was visible this frame
-    bool shouldRender = (dat&0x7fffffffu) == frameId;
-    bool renderTemporally = (dat&0x80000000u)==0;// means, if it was not visible last frame
+    bool shouldRender = shadowPass || (dat&0x7fffffffu) == frameId;
+    bool renderTemporally = !shadowPass && (dat&0x80000000u)==0;// means, if it was not visible last frame
 
 
 
@@ -83,12 +85,12 @@ void main() {
 
         //TODO implicit command merging
         uint msk = 0;
-        msk |= uint(((counts.y      &0xFFFFu)!=0) && (relative.y>-1))<<0;
-        msk |= uint((((counts.y>>16)&0xFFFFu)!=0) && (relative.y<1 ))<<1;
-        msk |= uint(((counts.z      &0xFFFFu)!=0) && (relative.z>-1))<<2;
-        msk |= uint((((counts.z>>16)&0xFFFFu)!=0) && (relative.z<1 ))<<3;
-        msk |= uint(((counts.w      &0xFFFFu)!=0) && (relative.x>-1))<<4;
-        msk |= uint((((counts.w>>16)&0xFFFFu)!=0) && (relative.x<1 ))<<5;
+        msk |= uint(((counts.y      &0xFFFFu)!=0) && (shadowPass || relative.y>-1))<<0;
+        msk |= uint((((counts.y>>16)&0xFFFFu)!=0) && (shadowPass || relative.y<1 ))<<1;
+        msk |= uint(((counts.z      &0xFFFFu)!=0) && (shadowPass || relative.z>-1))<<2;
+        msk |= uint((((counts.z>>16)&0xFFFFu)!=0) && (shadowPass || relative.z<1 ))<<3;
+        msk |= uint(((counts.w      &0xFFFFu)!=0) && (shadowPass || relative.x>-1))<<4;
+        msk |= uint((((counts.w>>16)&0xFFFFu)!=0) && (shadowPass || relative.x<1 ))<<5;
 
         msk |= uint(((counts.x>>16)&0xFFFFu)!=0)<<6;
 
@@ -109,7 +111,7 @@ void main() {
         uint count = 0;
         //Translucency
         count = counts.x&0xFFFFu;
-        if (count != 0) {
+        if (!shadowPass && count != 0) {
             uint tp = atomicAdd(translucentDrawCount, 1)+TRANSLUCENT_WRITE_BASE;
             translucentCommandData[tp] = drawId;
             uvec3 absRel = abs(relative);

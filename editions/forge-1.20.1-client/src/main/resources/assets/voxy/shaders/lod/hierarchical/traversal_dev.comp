@@ -18,6 +18,7 @@ layout(binding = SCENE_UNIFORM_BINDING, std140) uniform SceneUniform {
     uint frameId;
     uint requestQueueSize;
     float renderDistance;
+    bool shadowPass;
 };
 
 #import <voxy:lod/hierarchical/queue.glsl>
@@ -125,7 +126,7 @@ void traverse(in UnpackedNode node) {
     setupScreenspace(node);
     //debugDumpNode(node);
 
-    if (outsideFrustum() || isCulledByHiz()) {
+    if (outsideFrustum() || (!shadowPass && isCulledByHiz())) {
         //printf("culled");
     } else {
         //It is visible, TODO: maybe do a more detailed hiz test? (or make it so that )
@@ -146,7 +147,7 @@ void traverse(in UnpackedNode node) {
                 // Coverage can end inside a coarse tile. The terrain fragment shader clips it to the radius.
                 bool shouldRenderSelf = true;
                 #else
-                bool shouldRenderSelf = renderDistance<0.0f;
+                bool shouldRenderSelf = shadowPass || renderDistance<0.0f;
                 if (!shouldRenderSelf) {
                     vec3 far = furthestPointToCamera(node);
                     shouldRenderSelf = (far.x*far.x+far.z*far.z+(16*16*16))<=renderDistance;//the +16*16 is to add some buffer room

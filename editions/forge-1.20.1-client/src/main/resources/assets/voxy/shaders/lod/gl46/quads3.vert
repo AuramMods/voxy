@@ -45,6 +45,9 @@ layout(location = 7) out flat uint quadDebug;
 #endif
 
 vec2 taaShift();
+#ifdef VOXY_SHADOW_PASS
+vec4 voxyShadowPosition(vec4 position);
+#endif
 
 //TODO: add a mechanism so that some quads can ignore backface culling
 // this would help alot with stuff like crops as they would look kinda weird i think,
@@ -69,6 +72,9 @@ void main() {
     #endif
     #endif
     (getQuadCornerPos(quad, cornerId));
+    #ifdef VOXY_SHADOW_PASS
+        gl_Position = voxyShadowPosition(gl_Position);
+    #endif
 
 
     #ifndef USE_NV_BARRY

@@ -37,6 +37,10 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
 
     private final GlBuffer shaderUniforms;
 
+    public String shadowPositionPatch() {
+        return this.data.shadowPositionPatch;
+    }
+
     public boolean hasTerrainTransition() {
         return this.terrainTransition;
     }

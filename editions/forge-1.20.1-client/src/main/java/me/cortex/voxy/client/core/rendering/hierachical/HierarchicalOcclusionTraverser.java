@@ -38,6 +38,7 @@ public class HierarchicalOcclusionTraverser {
 
     public static final int MAX_REQUEST_QUEUE_SIZE = 50;
     public static final int MAX_QUEUE_SIZE = 200_000;
+    public static final int MAX_SHADOW_SECTIONS = 16_384;
 
 
     private static final int MAX_ITERATIONS = WorldEngine.MAX_LOD_LAYER+1;
@@ -208,13 +209,15 @@ public class HierarchicalOcclusionTraverser {
 
         //MemoryUtil.memPutFloat(ptr, viewport.height); ptr += 4;
 
-        final float screenspaceAreaDecreasingSize = VoxyConfig.CONFIG.subDivisionSize*VoxyConfig.CONFIG.subDivisionSize;
+        float subdivision = viewport.isShadowPass() ? 32.0f : VoxyConfig.CONFIG.subDivisionSize;
+        final float screenspaceAreaDecreasingSize = subdivision * subdivision;
         //Screen space size for descending
         MemoryUtil.memPutFloat(ptr, (float) (screenspaceAreaDecreasingSize) /(viewport.width*viewport.height)); ptr += 4;
 
         setFrustum(viewport, ptr); ptr += 4*4*6;
 
-        MemoryUtil.memPutInt(ptr, (int) (viewport.getRenderList().size()/4-1)); ptr += 4;
+        int capacity = (int) (viewport.getRenderList().size() / 4 - 1);
+        MemoryUtil.memPutInt(ptr, viewport.isShadowPass() ? Math.min(capacity, MAX_SHADOW_SECTIONS) : capacity); ptr += 4;
 
         //VisibilityId
         MemoryUtil.memPutInt(ptr, this.nodeCleaner.visibilityId); ptr += 4;
@@ -229,7 +232,9 @@ public class HierarchicalOcclusionTraverser {
 
         //Put the render distance here so that it can generate a correct circle, TODO: make it not top level section sized
         float lodRadius = me.cortex.voxy.client.network.ClientLodStream.clampRadius(VoxyConfig.CONFIG.getLodRenderDistanceBlocks());
-        MemoryUtil.memPutFloat(ptr, lodRadius * lodRadius); ptr += 4;
+        float radius = viewport.isShadowPass() ? Math.min(lodRadius, viewport.shadowCasterRange) : lodRadius;
+        MemoryUtil.memPutFloat(ptr, radius * radius); ptr += 4;
+        MemoryUtil.memPutInt(ptr, viewport.isShadowPass() ? 1 : 0);
 
 
     }
@@ -238,8 +243,10 @@ public class HierarchicalOcclusionTraverser {
         glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, this.queueMetaBuffer.id);
 
         //Bind the hiz buffer
-        glBindTextureUnit(0, viewport.hiZBuffer.getHizTextureId());
-        glBindSampler(0, this.hizSampler);
+        if (!viewport.isShadowPass()) {
+            glBindTextureUnit(0, viewport.hiZBuffer.getHizTextureId());
+            glBindSampler(0, this.hizSampler);
+        }
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, RENDER_QUEUE_BINDING, viewport.getRenderList().id);
     }
 
@@ -251,7 +258,7 @@ public class HierarchicalOcclusionTraverser {
         this.bindings(viewport);
 
         //Bind shader uniforms for taa if we have a pipeline
-        if (this.pipeline != null) this.pipeline.bindUniforms();
+        if (!viewport.isShadowPass() && this.pipeline != null) this.pipeline.bindUniforms();
 
         PrintfDebugUtil.bind();
 
