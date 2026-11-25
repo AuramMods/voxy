@@ -80,3 +80,15 @@ A newly submitted solid section takes 180 ms to reach its normal blend weight. I
 When Voxy wins an overlap pixel, the deferred shader still uses Embeddium's depth for that pixel. Voxy now writes the shading normal in world space and the flat normal in view space for those pixels, matching the near terrain format. Before the change, the sun direction and shadow bias used normals from the wrong coordinate spaces. The shader keeps the same dither and uses the existing shadow pass.
 
 At three chunks on macOS, a fixed daylight camera viewed a white concrete panel with forced 0%, 50%, and 100% Voxy selection in the overlap. The old shader reduced the panel's sampled brightness by about 12% at half coverage. The patched captures matched the near-only reference to within one 8-bit luma level across all three weights in the sunlit sample. The normal distance-based shader also reloaded and rendered successfully. The change takes effect on shader reload.
+
+## Reverse terrain handoff and atlas filtering
+
+Solid terrain uses a 350 ms transition in either direction. When a previously drawn Embeddium section crosses its visibility distance, Voxy lets that section stay in the draw list for the fade as long as its mesh remains resident and stays within one extra section of the distance limit. A camera reversal continues from the current blend weight. Sections that unload immediately fall back to available Voxy terrain.
+
+The Voxy model atlas includes the complete chain down to one texel per baked face. Minification blends texels and mip levels inside each face, while magnification retains the pixel-art texture. Base alpha tests and tint flags still read exact atlas texels. The extra holes used by the balanced leaf mode fade out as their texels become subpixel.
+
+## Water depth, cloud edges, and shadow samples
+
+For Voxy water with a visible bed, the lighting pass uses the measured vertical depth for sunlight attenuation. The fog pass uses the actual view-ray distance from the surface to the bed. The old multipliers could hide shallow tops and the pool floor. At three chunks, the overhead macOS test showed the colored floor markings through the Voxy water.
+
+The cloud upscaler compares the first visible surface in both renderers. It rejects sky taps on terrain, including when all the surrounding low-resolution taps miss a thin foreground surface. Both opaque and translucent shadow filters now center every tap on the receiver. Colored shadow opacity uses the sample average.
