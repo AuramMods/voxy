@@ -438,6 +438,12 @@ public class VoxyRenderSystem {
         return Minecraft.getInstance().options.getEffectiveRenderDistance()*16;
     }
 
+    public static float getVoxyNearPlane() {
+        return VoxyClient.disableSodiumChunkRender() ? 0.1f : (getRenderDistance() <= 32 ? 8 : 16);
+    }
+
+    public static final float VOXY_FAR_PLANE = 48_000;
+
     /*
     private static float getGameFoV() {
         var client = Minecraft.getInstance();
@@ -477,10 +483,8 @@ public class VoxyRenderSystem {
         var rawMCProj = RenderSystem.getProjectionMatrix();
         var extraProjection = rawMCProj.invert(new Matrix4f()).mul(base);
 
-        float near = getRenderDistance()<=32.0f?8f:16f;
-        near = VoxyClient.disableSodiumChunkRender()?0.1f:near;
-
-        float far = 16*3000;
+        float near = getVoxyNearPlane();
+        float far = VOXY_FAR_PLANE;
 
         /* jank way of just modifying the base raw
         if (true) {
