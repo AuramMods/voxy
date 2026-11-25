@@ -49,6 +49,7 @@ public class VoxyUniforms {
         uniforms
                 .uniform1i(PER_FRAME, "vxRenderDistance", ()->Math.round(VoxyConfig.CONFIG.sectionRenderDistance*32))//In chunks
                 .uniform1i(PER_FRAME, "vxRenderDistanceBlocks", () -> Math.round(VoxyConfig.CONFIG.sectionRenderDistance * 32) * 16)
+                .uniform1f(PER_FRAME, "vxNearRenderDistance", VoxyRenderSystem::getRenderDistance)
                 .uniform1f(PER_FRAME, "vxNear", VoxyRenderSystem::getVoxyNearPlane)
                 .uniform1f(PER_FRAME, "vxFar", () -> VoxyRenderSystem.VOXY_FAR_PLANE)
                 .uniformMatrix(PER_FRAME, "vxViewProj", VoxyUniforms::getViewProjection)

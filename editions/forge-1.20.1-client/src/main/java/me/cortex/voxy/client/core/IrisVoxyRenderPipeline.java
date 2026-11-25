@@ -264,6 +264,9 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
         if (this.data.translucentFragPatch() == null) return null;
 
         var builder = this.buildGenericShaderHeader(renderer, input);
+        if (this.data.waterTransition) {
+            builder.insert(input.indexOf('\n') + 1, "#define VOXY_WATER_TRANSITION\n");
+        }
         builder.append(this.data.translucentFragPatch());
         return builder.toString();
     }

@@ -152,6 +152,9 @@ struct VoxyFragmentParameters {
 };
 
 void voxy_emitFragment(VoxyFragmentParameters parameters);
+#if defined TRANSLUCENT && defined VOXY_WATER_TRANSITION
+bool voxy_keepWaterOverlap();
+#endif
 #else
 
 vec4 computeColour(vec2 texturePos, vec4 colour) {
@@ -250,17 +253,17 @@ void main() {
         return;
     }
 
-    // Opaque terrain follows the circular stencil owner. Translucent terrain keeps the
-    // section-depth path so water does not acquire a second circular shoreline.
-    #ifdef TRANSLUCENT
-    const bool useChunkBounds = true;
-    #else
-    const bool useChunkBounds = true;
-    #endif
-    if (useChunkBounds && DEPTH_SCALAR_COMPARE(gl_FragCoord.z,
+    if (DEPTH_SCALAR_COMPARE(gl_FragCoord.z,
             texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {
+        #if defined TRANSLUCENT && defined PATCHED_SHADER && defined VOXY_WATER_TRANSITION
+        if (!useIndependentWaterBoundary() || getFace() != 1u || !voxy_keepWaterOverlap()) {
+            discard;
+            return;
+        }
+        #else
         discard;
         return;
+        #endif
     }
 
 

@@ -34,3 +34,9 @@ The cloud ray marcher now stops at Voxy's depth when a pixel contains distant te
 ## Shader water beyond the near render distance
 
 The water passes now reconstruct both the Voxy water surface and the opaque terrain beneath it. This gives absorption, caustics, and underwater fog the depth difference they need. In the daylight smoke test, the distant river regained a visible surface and hid the deeper riverbed. At midnight, the near and distant water stayed dark.
+
+## Water transition and cloud reflections
+
+AuramBliss opts into Voxy's water overlap through `voxy.json`. Voxy uses Bliss's dither pattern across the overlap band for top faces of water. The near pass checks the Voxy front and opaque depths before yielding a pixel, so a distinct surface can still render. Near water gradually reduces its screen-space reflections as the distant pass takes over, and both passes use the same wave strength.
+
+Water reflections map the reflected ray to the lowest cloud layer and aim the camera-centered sky lookup at that point. Both passes also use the sky atlas's vertical coordinate convention. The Mac pond fixture crosses the near render boundary and was checked from two heights. A temporary diagnostic color confirmed that Voxy draws water inside the near section bounds. The overlap requires the matching Voxy jar and a client restart.

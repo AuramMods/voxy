@@ -183,6 +183,7 @@ public class IrisShaderPatch {
         public float[] renderScale;
         public boolean useViewportDims;
         public boolean skipShaderDepthHackFix;
+        public boolean waterTransition;
         //public boolean deferTranslucentRendering;
         public String checkValid() {
             if (this.blending != null) {
@@ -283,6 +284,10 @@ public class IrisShaderPatch {
 
     public boolean emitToVanillaDepth() {
         return !this.patchData.excludeLodsFromVanillaDepth;
+    }
+
+    public boolean hasWaterTransition() {
+        return this.patchData.waterTransition;
     }
 
     public float[] getRenderScale() {
