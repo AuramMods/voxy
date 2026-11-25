@@ -60,3 +60,9 @@ The full Auram fixture uses five chunks of near render distance and includes a p
 Bliss's border fog used the straight-line distance to the camera. The vertical distance could push nearby water into full fog, replacing its color and reflections with the sky color. The near and deferred passes now measure horizontal distance and use Voxy's render range when it is active. Distant Horizons retains its original radial fade.
 
 In the copied Auram world, disabling border fog removed the disc around the ship at the original camera position. The patch removed it with border fog enabled at Y 142 and Y 170. Oculus picked up the change on shader reload.
+
+## Lighting filter at the canopy boundary
+
+The ambient occlusion and shadow filter read only Minecraft's depth. A Voxy leaf and an empty sky pixel could both appear at the far plane, so the filter could borrow lighting from across the leaf silhouette. The filter now compares the near and Voxy opaque surfaces in view-space blocks and rejects taps across depth breaks. The macOS compatibility path reads both raw depths from the buffer already produced by Bliss.
+
+The old and new filters ran in the same copied Auram scene at the pumpkin hill. The exact thin line in the original screenshot still needs a comparison from that camera position.
