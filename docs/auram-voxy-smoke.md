@@ -13,6 +13,15 @@ Use a separate Prism instance with Minecraft 1.20.1, Forge 47.4.10, and ARM64 Ja
 
 Set Minecraft's master volume to zero and disable pause on loss of focus for background testing. Use a disposable world. Keep Distant Horizons off the mod list.
 
+## Reproduce the client
+
+1. Create an isolated Prism profile named **Auram Voxy Test**. Add Forge 47.4.10, select an ARM64 Java 17 runtime, and add the mods from the table.
+2. Copy the Forge client jar from the edition's `build/libs/` into the profile's `minecraft/mods/`. Copy the checked-in `shaderpacks/AuramBliss/` directory into the profile's `minecraft/shaderpacks/`. Copy the source instance's `AuramBliss.txt` preset alongside it and select AuramBliss in Oculus. The Mac smoke run used `TAA_UPSCALING=true` and `SCALE_FACTOR=0.80`.
+3. For a terrain control, select six chunks of near render distance and disable shaders. In a disposable world with generated terrain beyond that radius, run `/voxy import current` and check for distant terrain. Close and reopen the client and check the same area without another import.
+4. Enable AuramBliss and check the same view. In-game shader reload should recreate the Voxy pipeline and keep the LoDs on screen. For the prepared **Voxy Smoke** world, the pond begins at Z 162, the white bridge continues to Z 194, and the candle fixture is just south of spawn. A Nether round trip exercises the dimension-specific patches.
+
+The installed profile ID is `AuramVoxyTest`. Its local background helper disables GLFW focus on show and routes smoke input to the isolated client only. The helper source and command runner are in that profile's `qa/` directory. Screenshots are under `evidence/`.
+
 ## GL and shader baseline
 
 Embeddium reported `Apple M4 Max` and `4.6.0 Metal - 91.7 (gla 1.0.1)`. Oculus selected the copied AuramBliss pack and initialized its 128³ raster colored-light volume. The existing compatibility jar logged missing optional integration classes, including its unused Distant Horizons mixins. The launch also logged a `GL_INVALID_VALUE` from `glTexImage2D`; shader selection and raster light volume initialization continued.
@@ -26,3 +35,17 @@ The jar contains ARM64 macOS, x64 Windows, and x64 Linux natives for RocksDB, SQ
 The first shaders-off run reached the terrain renderer and failed in JOML 1.10.5's native-address matrix writer. The renderer, Iris uniform uploads, and software rasterizer now marshal their values into native buffers without assuming Java object field offsets.
 
 In the disposable `Voxy Smoke` world, the blue and red landmarks sit 184 and 208 blocks south of the spawn platform. At six chunks of near render distance, both were absent before `/voxy import current` and visible afterward. Both were still visible after a clean shutdown and restart without re-importing. The shaders-off run used `NormalRenderPipeline` and `MDICSectionRenderer`. The local baseline, import, and restart screenshots are in the Prism test instance's `evidence/` directory.
+
+## Smoke results
+
+| Check | Result |
+| --- | --- |
+| Original upscale preset | The red and blue distant landmarks and the bridge rendered through `IrisVoxyRenderPipeline` and `MDICSectionRenderer`. |
+| Water, glass, and fog | The pond and glass rim rendered through the translucent pass. Clear, rain, and midnight screenshots record the same distant water and bridge view. |
+| Shadows and raster colored lighting | The daylight fixture shows a shadow. At midnight the same wall and ground show separate red and blue candle lighting. Oculus logged both Embeddium terrain and Oculus entity occupancy captures. |
+| Shader reload and dimension changes | Reload rebuilt the Voxy renderer and preserved the scene. The Overworld and Nether both created the patched shader pipeline during a round trip. |
+| Rebuilt artifact | A forced Gradle rebuild was installed with a fresh copy of the checked-in shader and launched into the same scene. The rebuilt jar and installed jar matched byte for byte. See `13-verified-rebuild.png`. |
+| Background and sound | GLFW focus was disabled for the isolated client. The active application stayed in front during the final launch, and the profile's master volume was zero. |
+| Windows | The jar retained x64 Windows natives for all four storage libraries and declares no GLA dependency. The available Parallels Windows entries were invalid, so Windows runtime behavior remains unverified. |
+
+Full Auram mod coverage, custom dimensions, and performance benchmarks are separate follow-up work. The staged shader changes are recorded in [AuramBliss changes for Voxy](aurambliss-voxy-changes.md).
