@@ -26,3 +26,7 @@ In a copy of the Auram world, the same two camera angles showed dark patches on 
 ## Bright ice and glass at night
 
 The Voxy translucent pass referenced an undefined `debug_ALBEDO` mode. GLSL evaluated it as zero, so the branch also ran in the default `debug_OFF` mode and overwrote the lit color with the raw texture color. Removing the unused branch restores the forward lighting and reflection calculation for distant translucent blocks, including water. The midnight smoke fixture showed normal lighting on the ice after an Oculus reload.
+
+## Volumetric clouds in front of and behind Voxy terrain
+
+The cloud ray marcher now stops at Voxy's depth when a pixel contains distant terrain. It uses the same inverse-projection helper as the cloud shadow calculation. At the same camera position, a distant panel below the cloud layer occluded clouds behind it after reload, while a higher panel still had clouds in front.
