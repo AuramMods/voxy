@@ -16,3 +16,9 @@ The original pack is recorded in commit `2ad07db5`. The version-1 Voxy integrati
 The Forge bridge exports Voxy's actual near and far planes and its render distance in blocks for these passes. Oculus reload recreates the Voxy renderer after replacing its framebuffers. The Mac raster light-volume capture still comes from Auram's compatibility jar.
 
 The Mac smoke run verified the original 0.8-scale TAA preset, colored distant landmarks, near and distant water and glass, and the stone bridge through the near-to-distant transition. Daylight and nighttime fixtures show shadows and red and blue raster light respectively. The Overworld and Nether both created the patched pipeline. The initial profile excludes the mods that provide Auram's custom dimensions, so their entry points still need full-pack testing.
+
+## View-dependent shadows on distant terrain
+
+The cloud shadow pass reconstructs Voxy pixels from Voxy's opaque depth and inverse projection. It applies the current render scale and TAA offset before converting the position to world space. Previously the pass sampled cloud shadows at Minecraft's far-plane position, which moved the shadow pattern over distant geometry as the camera turned.
+
+In a copy of the Auram world, the same two camera angles showed dark patches on a distant rock face with the old shader. Reloading the patched shader removed those patches while retaining the rock face and nearby terrain. This change takes effect on reload in Oculus.
