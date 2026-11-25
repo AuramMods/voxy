@@ -7,14 +7,26 @@ import me.cortex.voxy.client.core.rendering.hierachical.HierarchicalOcclusionTra
 
 public class MDICViewport extends Viewport<MDICViewport> {
     public final GlBuffer drawCountCallBuffer = new GlBuffer(1024).zero();
-    public final GlBuffer drawCallBuffer = new GlBuffer(5*4*(MDICSectionRenderer.OPAQUE_DRAW_COUNT+MDICSectionRenderer.TRANSLUCENT_DRAW_COUNT+MDICSectionRenderer.TEMPORAL_DRAW_COUNT)).zero();//400k draw calls
-    public final GlBuffer positionScratchBuffer  = new GlBuffer(8*400000).zero();//400k positions
-    public final GlBuffer indirectLookupBuffer = new GlBuffer(HierarchicalOcclusionTraverser.MAX_QUEUE_SIZE*4+4);//In theory, this could be global/not unique to the viewport
+    public final GlBuffer drawCallBuffer;
+    public final GlBuffer positionScratchBuffer;
+    public final GlBuffer indirectLookupBuffer;
     public final GlBuffer visibilityBuffer;
 
     public MDICViewport(RenderProperties properties, int maxSectionCount) {
+        this(properties, maxSectionCount, false);
+    }
+
+    MDICViewport(RenderProperties properties, int maxSectionCount, boolean shadowPass) {
         super(properties);
-        this.visibilityBuffer = new GlBuffer(maxSectionCount*4L);
+        int queueCapacity = shadowPass ? HierarchicalOcclusionTraverser.MAX_SHADOW_SECTIONS
+                : HierarchicalOcclusionTraverser.MAX_QUEUE_SIZE;
+        int drawCapacity = shadowPass ? queueCapacity * 7 : MDICSectionRenderer.OPAQUE_DRAW_COUNT
+                + MDICSectionRenderer.TRANSLUCENT_DRAW_COUNT + MDICSectionRenderer.TEMPORAL_DRAW_COUNT;
+        this.drawCallBuffer = new GlBuffer(20L * drawCapacity).zero();
+        this.positionScratchBuffer = new GlBuffer(8L * (shadowPass ? queueCapacity : 400_000)).zero();
+        this.indirectLookupBuffer = new GlBuffer(4L * (queueCapacity + 1));
+        // The shared command shader requires a binding here even though shadows skip eye visibility.
+        this.visibilityBuffer = new GlBuffer(shadowPass ? 4 : maxSectionCount * 4L);
     }
 
     @Override

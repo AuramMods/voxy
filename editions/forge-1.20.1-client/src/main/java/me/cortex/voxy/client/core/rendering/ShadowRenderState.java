@@ -1,8 +1,11 @@
 package me.cortex.voxy.client.core.rendering;
 
+import me.cortex.voxy.client.core.rendering.util.PrintfDebugUtil;
+
 import static org.lwjgl.opengl.ARBIndirectParameters.GL_PARAMETER_BUFFER_ARB;
 import static org.lwjgl.opengl.ARBIndirectParameters.GL_PARAMETER_BUFFER_BINDING_ARB;
 import static org.lwjgl.opengl.GL11C.*;
+import static org.lwjgl.opengl.GL12C.GL_UNPACK_SKIP_IMAGES;
 import static org.lwjgl.opengl.GL13C.*;
 import static org.lwjgl.opengl.GL15C.glBindBuffer;
 import static org.lwjgl.opengl.GL20C.GL_CURRENT_PROGRAM;
@@ -10,7 +13,10 @@ import static org.lwjgl.opengl.GL20C.glUseProgram;
 import static org.lwjgl.opengl.GL30C.*;
 import static org.lwjgl.opengl.GL31C.GL_UNIFORM_BUFFER;
 import static org.lwjgl.opengl.GL31C.GL_UNIFORM_BUFFER_BINDING;
+import static org.lwjgl.opengl.GL31C.GL_UNIFORM_BUFFER_SIZE;
+import static org.lwjgl.opengl.GL31C.GL_UNIFORM_BUFFER_START;
 import static org.lwjgl.opengl.GL32C.GL_PROVOKING_VERTEX;
+import static org.lwjgl.opengl.GL32C.glGetInteger64i;
 import static org.lwjgl.opengl.GL32C.glProvokingVertex;
 import static org.lwjgl.opengl.GL33C.GL_SAMPLER_BINDING;
 import static org.lwjgl.opengl.GL33C.glBindSampler;
@@ -19,7 +25,25 @@ import static org.lwjgl.opengl.GL40C.GL_DRAW_INDIRECT_BUFFER_BINDING;
 import static org.lwjgl.opengl.GL43C.*;
 
 public final class ShadowRenderState {
+    private static final int[] UNPACK_FIELDS = {
+            GL_UNPACK_ROW_LENGTH, GL_UNPACK_IMAGE_HEIGHT, GL_UNPACK_SKIP_PIXELS,
+            GL_UNPACK_SKIP_ROWS, GL_UNPACK_SKIP_IMAGES
+    };
+
     private ShadowRenderState() {}
+
+    private record BufferBinding(int buffer, long offset, long size) {
+        static BufferBinding capture(int index, int binding, int start, int size) {
+            int buffer = glGetIntegeri(binding, index);
+            if (buffer == 0) return new BufferBinding(0, 0, 0);
+            return new BufferBinding(buffer, glGetInteger64i(start, index), glGetInteger64i(size, index));
+        }
+
+        void restore(int target, int index) {
+            if (this.size != 0) glBindBufferRange(target, index, this.buffer, this.offset, this.size);
+            else glBindBufferBase(target, index, this.buffer);
+        }
+    }
 
     public static void run(Runnable draw) {
         int program = glGetInteger(GL_CURRENT_PROGRAM);
@@ -41,22 +65,30 @@ public final class ShadowRenderState {
         boolean depthTest = glIsEnabled(GL_DEPTH_TEST);
         boolean cullFace = glIsEnabled(GL_CULL_FACE);
         boolean stencil = glIsEnabled(GL_STENCIL_TEST);
-        int[] storage = new int[11];
-        for (int i = 0; i < storage.length; i++) storage[i] = glGetIntegeri(GL_SHADER_STORAGE_BUFFER_BINDING, i);
+        BufferBinding[] storage = new BufferBinding[11];
+        for (int i = 0; i < storage.length; i++) {
+            storage[i] = BufferBinding.capture(i, GL_SHADER_STORAGE_BUFFER_BINDING,
+                    GL_SHADER_STORAGE_BUFFER_START, GL_SHADER_STORAGE_BUFFER_SIZE);
+        }
+        BufferBinding printf = PrintfDebugUtil.ENABLE_PRINTF_DEBUGGING
+                ? BufferBinding.capture(20, GL_SHADER_STORAGE_BUFFER_BINDING,
+                    GL_SHADER_STORAGE_BUFFER_START, GL_SHADER_STORAGE_BUFFER_SIZE) : null;
         int genericStorage = glGetInteger(GL_SHADER_STORAGE_BUFFER_BINDING);
-        int uniform = glGetIntegeri(GL_UNIFORM_BUFFER_BINDING, 0);
+        var drawUniform = BufferBinding.capture(0, GL_UNIFORM_BUFFER_BINDING, GL_UNIFORM_BUFFER_START, GL_UNIFORM_BUFFER_SIZE);
+        var traversalUniform = BufferBinding.capture(1, GL_UNIFORM_BUFFER_BINDING, GL_UNIFORM_BUFFER_START, GL_UNIFORM_BUFFER_SIZE);
         int genericUniform = glGetInteger(GL_UNIFORM_BUFFER_BINDING);
-        int[] unpackFields = {GL_UNPACK_ROW_LENGTH, GL_UNPACK_IMAGE_HEIGHT, GL_UNPACK_SKIP_PIXELS, GL_UNPACK_SKIP_ROWS};
-        int[] unpackValues = new int[unpackFields.length];
-        for (int i = 0; i < unpackFields.length; i++) unpackValues[i] = glGetInteger(unpackFields[i]);
+        int[] unpackValues = new int[UNPACK_FIELDS.length];
+        for (int i = 0; i < UNPACK_FIELDS.length; i++) unpackValues[i] = glGetInteger(UNPACK_FIELDS[i]);
         try {
             glDisable(GL_STENCIL_TEST);
             draw.run();
         } finally {
-            for (int i = 0; i < unpackFields.length; i++) glPixelStorei(unpackFields[i], unpackValues[i]);
-            for (int i = 0; i < storage.length; i++) glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, storage[i]);
+            for (int i = 0; i < UNPACK_FIELDS.length; i++) glPixelStorei(UNPACK_FIELDS[i], unpackValues[i]);
+            for (int i = 0; i < storage.length; i++) storage[i].restore(GL_SHADER_STORAGE_BUFFER, i);
+            if (printf != null) printf.restore(GL_SHADER_STORAGE_BUFFER, 20);
             glBindBuffer(GL_SHADER_STORAGE_BUFFER, genericStorage);
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniform);
+            drawUniform.restore(GL_UNIFORM_BUFFER, 0);
+            traversalUniform.restore(GL_UNIFORM_BUFFER, 1);
             glBindBuffer(GL_UNIFORM_BUFFER, genericUniform);
             glBindBuffer(GL_DRAW_INDIRECT_BUFFER, drawIndirect);
             glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, dispatchIndirect);

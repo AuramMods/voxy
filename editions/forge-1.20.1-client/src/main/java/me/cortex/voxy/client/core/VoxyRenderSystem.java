@@ -84,6 +84,7 @@ public class VoxyRenderSystem {
     private final NearTerrainCoverage shadowTerrainCoverage;
     private GlFramebuffer shadowFramebuffer;
     private int shadowDepthTexture;
+    private MDICViewport shadowViewport;
 
     private final ViewportSelector<?> viewportSelector;
 
@@ -288,17 +289,19 @@ public class VoxyRenderSystem {
                                     double cameraZ, int depthTexture, int resolution) {
         if (this.shadowTerrainCoverage == null) return;
         if (visionEffectPresent()) return;
-        if (!(this.pipeline.sectionRenderer instanceof MDICSectionRenderer renderer)
-                || !(this.viewportSelector.getViewport() instanceof MDICViewport viewport)) return;
-
-        // Bliss's nonlinear warp can admit casters beyond the undistorted XY
-        // frustum. The separate clip-space Z scale matches its depth compression.
-        var bounds = new Matrix4f(projection).scaleLocal(0.25f, 0.25f, 1.0f / 6.0f);
-        viewport.shadowCasterRange = 768.0f;
-        viewport.setVanillaProjection(projection).setProjection(bounds).setModelView(modelView)
-                .setCamera(cameraX, cameraY, cameraZ).setScreenSize(resolution, resolution).update();
+        if (!(this.pipeline.sectionRenderer instanceof MDICSectionRenderer renderer)) return;
 
         ShadowRenderState.run(() -> {
+            if (this.shadowViewport == null) this.shadowViewport = renderer.createShadowViewport();
+            var viewport = this.shadowViewport;
+            // Bliss's nonlinear warp admits casters beyond the undistorted XY frustum.
+            // The separate Z scale matches the shadow map's clip-space depth compression.
+            viewport.shadowCasterRange = 768.0f;
+            viewport.setVanillaProjection(projection).setModelView(modelView)
+                    .setCamera(cameraX, cameraY, cameraZ).setScreenSize(resolution, resolution);
+            viewport.projection.set(projection).scaleLocal(0.25f, 0.25f, 1.0f / 6.0f);
+            viewport.update();
+
             if (this.shadowFramebuffer == null) {
                 this.shadowFramebuffer = new GlFramebuffer().name("Voxy Oculus shadow depth");
                 glNamedFramebufferDrawBuffer(this.shadowFramebuffer.id, GL_NONE);
@@ -606,6 +609,7 @@ public class VoxyRenderSystem {
             interrupted |= Thread.interrupted();
             cleanup.run(() -> DownloadStream.INSTANCE.flushWaitClear());
             if (this.shadowFramebuffer != null) cleanup.run(this.shadowFramebuffer::free);
+            if (this.shadowViewport != null) cleanup.run(this.shadowViewport::delete);
             if (this.shadowTerrainCoverage != null) cleanup.run(this.shadowTerrainCoverage::free);
             if (this.nearTerrainCoverage != null) cleanup.run(this.nearTerrainCoverage::free);
             if (this.viewportSelector != null) cleanup.run(this.viewportSelector::free);

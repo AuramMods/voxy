@@ -465,6 +465,10 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         return new MDICViewport(this.properties, this.geometryManager.getMaxSectionCount());
     }
 
+    public MDICViewport createShadowViewport() {
+        return new MDICViewport(this.properties, this.geometryManager.getMaxSectionCount(), true);
+    }
+
     @Override
     // ---- 生命周期 ------------------------------------------------------
 
