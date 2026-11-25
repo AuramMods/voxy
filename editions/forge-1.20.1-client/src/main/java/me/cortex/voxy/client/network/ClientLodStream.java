@@ -1,6 +1,8 @@
 package me.cortex.voxy.client.network;
 
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
+import me.cortex.voxy.client.config.VoxyConfig;
+import me.cortex.voxy.client.core.rendering.Viewport;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.config.section.LodSectionStorage;
 import me.cortex.voxy.common.network.LodChannel;
@@ -13,6 +15,10 @@ import me.cortex.voxy.common.world.WorldSection;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.RegistryAccess;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -21,15 +27,24 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+@Mod.EventBusSubscriber(modid = "voxy", value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class ClientLodStream {
     private static final int ALL_MESH_NEIGHBORS = 0x3f | (0xf << 6) | (0xf << 10) | (0xf << 14) | (3 << 18);
     private static volatile Context context;
     private static volatile LodChannel.Scope announced;
     private static ThreadPoolExecutor worker;
     private static long receivedBytes;
+    private static long receivedTiles;
+    private static long nextViewScan;
+    private static long lastViewTiles;
+    private static ViewSignature previousPlan;
+    private static long[] previousView;
 
     private record Context(LodChannel.Scope scope, WorldIdentifier vanilla, WorldIdentifier remote,
                            RegistryAccess registries, WorldEngine world, LodSectionStorage storage) {}
+
+    private record ViewSignature(int x, int y, int z, int yaw, int pitch, int width, int height,
+                                 int projectionScale, float radius, float precision) {}
 
     private ClientLodStream() {}
 
@@ -45,6 +60,8 @@ public final class ClientLodStream {
     public static void close() {
         announced = null;
         context = null;
+        previousPlan = null;
+        previousView = null;
         LodChannel.setClientHandler(message -> {});
         if (worker != null) {
             worker.shutdown();
@@ -59,6 +76,7 @@ public final class ClientLodStream {
         }
         Logger.info("Voxy LOD session received " + receivedBytes + " compressed bytes");
         receivedBytes = 0;
+        receivedTiles = 0;
     }
 
     public static WorldIdentifier identity(WorldIdentifier vanilla) {
@@ -80,6 +98,51 @@ public final class ClientLodStream {
                 ? blocks : Math.min(blocks, ready.radiusChunks() * 16f);
     }
 
+    public static void prioritize(Viewport<?> viewport) {
+        var ready = context;
+        var minecraft = Minecraft.getInstance();
+        var level = minecraft.level;
+        long now = System.nanoTime();
+        if (ready == null || level == null || previousPlan != null && now < nextViewScan) return;
+        nextViewScan = now + TimeUnit.MILLISECONDS.toNanos(500);
+        var camera = minecraft.gameRenderer.getMainCamera();
+        float radius = clampRadius(VoxyConfig.CONFIG.getLodRenderDistanceBlocks());
+        var signature = new ViewSignature((int) Math.floor(viewport.cameraX), (int) Math.floor(viewport.cameraY),
+                (int) Math.floor(viewport.cameraZ), Math.round(camera.getYRot() / 4), Math.round(camera.getXRot() / 4),
+                viewport.width, viewport.height, Math.round(viewport.projection.m11() * 256), radius,
+                VoxyConfig.CONFIG.subDivisionSize);
+        if (lastViewTiles == receivedTiles && signature.equals(previousPlan)) return;
+        previousPlan = signature;
+        lastViewTiles = receivedTiles;
+        var view = new ClientLodDemand(viewport, level.getMinBuildHeight(), level.getMaxBuildHeight(), radius);
+        submit(ready, () -> {
+            var wanted = view.plan(ready.storage);
+            var keys = Arrays.copyOf(wanted, Math.min(wanted.length, LodChannel.MAX_OFFER));
+            int pinned = Math.min(keys.length, LodChannel.MAX_OFFER / 4);
+            int count = pinned;
+            for (int i = pinned; i < wanted.length && count < keys.length; i++) {
+                if (ready.storage.remoteTile(wanted[i]) == null) keys[count++] = wanted[i];
+            }
+            var demand = Arrays.copyOf(keys, count);
+            Minecraft.getInstance().execute(() -> {
+                if (context != ready || Arrays.equals(previousView, demand)) return;
+                long batch = previousView == null ? LodChannel.VIEW_READY : LodChannel.VIEW_CHANGED;
+                previousView = demand;
+                LodChannel.request(new LodChannel.Request(ready.scope.scope(), batch, demand));
+            });
+        });
+    }
+
+    @SubscribeEvent
+    public static void onTick(TickEvent.ClientTickEvent event) {
+        var pending = announced;
+        var level = Minecraft.getInstance().level;
+        if (event.phase == TickEvent.Phase.END && context == null && pending != null && level != null
+                && pending.dimension().equals(level.dimension().location())) {
+            begin(pending);
+        }
+    }
+
     private static void receive(LodChannel.ClientMessage message) {
         if (message instanceof LodChannel.Scope scope) {
             begin(scope);
@@ -87,15 +150,12 @@ public final class ClientLodStream {
             var ready = context;
             if (ready != null && ready.scope.scope() == offer.scope()) {
                 submit(ready, () -> requestMissing(ready, offer));
-            } else if (announced != null && announced.scope() == offer.scope()) {
-                begin(announced);
-                var retry = context;
-                if (retry != null) submit(retry, () -> requestMissing(retry, offer));
             }
         } else if (message instanceof LodChannel.Section section) {
             var ready = context;
             if (ready != null && ready.scope.scope() == section.scope()) {
                 receivedBytes += section.data().length;
+                receivedTiles++;
                 submit(ready, () -> accept(ready, section));
             }
         }
@@ -117,6 +177,9 @@ public final class ClientLodStream {
         if (world == null || !(world.storage instanceof LodSectionStorage storage)) return;
         var previous = context;
         context = new Context(scope, vanilla, remote, level.registryAccess(), world, storage);
+        previousPlan = null;
+        previousView = null;
+        nextViewScan = 0;
         if (previous == null || previous.world != world || previous.scope.radiusChunks() != scope.radiusChunks()) {
             var renderer = (IGetVoxyRenderSystem) minecraft.levelRenderer;
             renderer.voxy$shutdownRenderer();
@@ -151,13 +214,13 @@ public final class ClientLodStream {
         for (int i = 0; i < keys.length; i++) {
             if (context != ready) return;
             long key = offer.keys()[i];
-            var tile = ready.storage.remoteTile(key);
             var version = offer.versions()[i];
             if (version == null) {
+                var tile = ready.storage.remoteTile(key);
                 if (tile != null && !ready.scope.session().equals(tile.session())) forget(ready, key);
             } else {
                 available = true;
-                if (tile == null || tile.needs(ready.scope.session(), version)) keys[count++] = key;
+                if (ready.storage.needsRemote(key, ready.scope.session(), version)) keys[count++] = key;
             }
         }
         if (!available) return;
@@ -169,8 +232,7 @@ public final class ClientLodStream {
 
     private static void accept(Context ready, LodChannel.Section message) {
         if (message.version() == null || message.version().revision() < 1) return;
-        var existing = ready.storage.remoteTile(message.key());
-        if (existing != null && !existing.needs(ready.scope.session(), message.version())) return;
+        if (!ready.storage.needsRemote(message.key(), ready.scope.session(), message.version())) return;
         var palette = new RegistryLodPalette(ready.world.getMapper(), ready.registries);
         LodSectionSnapshot snapshot;
         try {

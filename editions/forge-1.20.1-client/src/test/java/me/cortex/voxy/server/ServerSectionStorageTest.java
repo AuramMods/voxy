@@ -35,6 +35,9 @@ class ServerSectionStorageTest {
             store.commitColumn(column, List.of(snapshot));
             assertEquals(1, store.revision(key));
             store.commitColumn(column, List.of(snapshot));
+            assertEquals(1, store.revision(key));
+            data[10] = 0x1000_0000;
+            store.commitColumn(column, List.of(snapshot));
         }
         try (var store = new LodSectionStorage(path)) {
             assertTrue(store.hasColumn(column));
@@ -63,6 +66,9 @@ class ServerSectionStorageTest {
         try (var store = new LodSectionStorage(path)) {
             assertEquals(13, store.remoteTile(key).version().revision());
             assertEquals(0, store.read(key).section().voxels()[0]);
+            assertFalse(store.needsRemote(key, session, new TileVersion(15, 19)));
+            assertEquals(15, store.remoteTile(key).version().revision());
+            assertFalse(store.needsRemote(key, session, new TileVersion(14, 20)));
             var nextSession = UUID.randomUUID();
             assertFalse(store.commitRemote(snapshot, nextSession, new TileVersion(13, 19), (byte) 0));
             assertTrue(store.commitRemote(snapshot, nextSession, new TileVersion(7, 20), (byte) 0));
@@ -87,6 +93,7 @@ class ServerSectionStorageTest {
             assertTrue(store.cacheWireTile(key, first));
             assertArrayEquals(encoded, store.wireTile(key).data());
             assertEquals(first.version(), store.wireVersion(key));
+            snapshot.voxels()[0] = 0x1000_0000;
             store.commitColumn(0, List.of(snapshot));
             assertNull(store.wireTile(key));
             assertNull(store.wireVersion(key));

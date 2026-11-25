@@ -94,8 +94,8 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
 
     public record RemoteTile(UUID session, TileVersion version, byte children) {
         public boolean needs(UUID session, TileVersion offered) {
-            if (session.equals(this.session)) return offered.revision() > this.version.revision();
-            return offered.content() != this.version.content();
+            return offered.content() != this.version.content()
+                    && (!session.equals(this.session) || offered.revision() > this.version.revision());
         }
     }
 
@@ -109,6 +109,22 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
         } catch (SQLException ex) {
             throw storageFailure(ex);
         }
+    }
+
+    public synchronized boolean needsRemote(long key, UUID session, TileVersion version) {
+        var current = this.remoteTile(key);
+        if (current == null || current.needs(session, version)) return true;
+        if (session.equals(current.session()) && version.revision() > current.version().revision()) {
+            // The decoded payload is already stored, so only advance the stale-packet fence.
+            try (var update = this.db.prepareStatement("UPDATE remote_versions SET revision=? WHERE id=?")) {
+                update.setLong(1, version.revision());
+                update.setLong(2, key);
+                update.executeUpdate();
+            } catch (SQLException ex) {
+                throw storageFailure(ex);
+            }
+        }
+        return false;
     }
 
     public boolean commitRemote(LodSectionSnapshot section, UUID session, TileVersion version, byte children) {
@@ -266,6 +282,7 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
             try (var update = this.db.prepareStatement("""
                     INSERT INTO section_v1(id, level, revision, data) VALUES(?, ?, 1, ?)
                     ON CONFLICT(id) DO UPDATE SET revision=revision+1, data=excluded.data
+                    WHERE section_v1.data<>excluded.data
                     """)) {
                 int index = 0;
                 for (var section : sections) {

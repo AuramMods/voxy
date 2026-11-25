@@ -281,6 +281,7 @@ public class VoxyRenderSystem {
         if (viewport.width <= 0 || viewport.height <= 0) {
             return;//Only render on valid viewport
         }
+        me.cortex.voxy.client.network.ClientLodStream.prioritize(viewport);
 
         TimingStatistics.resetSamplers();
 

@@ -19,7 +19,9 @@ import java.util.function.Supplier;
 
 public final class LodChannel {
     public static final int MAX_OFFER = 64;
-    private static final String VERSION = "2";
+    public static final long VIEW_READY = 0;
+    public static final long VIEW_CHANGED = -1;
+    private static final String VERSION = "4";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("voxy", "lod"), () -> VERSION,
             NetworkRegistry.acceptMissingOr(VERSION), NetworkRegistry.acceptMissingOr(VERSION));
