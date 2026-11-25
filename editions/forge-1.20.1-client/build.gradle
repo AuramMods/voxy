@@ -1,0 +1,297 @@
+plugins {
+    id 'dev.architectury.loom' version '1.6.422'
+    id 'maven-publish'
+}
+
+sourceSets.main.java.srcDir('../../shared/seedgen/java')
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.minecraftforge.net/' }
+    maven { url = 'https://maven.blamejared.com/' }
+    maven {
+        name = 'Architectury'
+        url = 'https://maven.architectury.dev/'
+        content { includeGroup 'dev.architectury' }
+    }
+    maven {
+        name = 'Create'
+        url = 'https://maven.createmod.net/'
+        content {
+            includeGroup 'net.createmod.ponder'
+            includeGroup 'dev.engine-room.flywheel'
+        }
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
+}
+
+configurations {
+    lwjglRuntimeBundle
+}
+
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        if (requested.group == 'dev.architectury' && requested.name == 'mixin-patched') {
+            useVersion '0.8.5.12'
+            because 'Architectury Loom requests a dynamic version that requires remote metadata'
+        }
+    }
+}
+
+loom {
+    silentMojangMappingsLicense()
+    accessWidenerPath = file('src/main/resources/voxy.accesswidener')
+
+    forge {
+        convertAccessWideners = true
+        mixinConfigs = [
+                'client.voxy.mixins.json',
+                'common.voxy.mixins.json'
+        ]
+    }
+
+    mixin.defaultRefmapName = 'voxy.refmap.json'
+
+    runs {
+        client {
+            client()
+            mods {
+                voxy { sourceSet sourceSets.main }
+            }
+        }
+    }
+}
+
+def gitCommitHash = providers.provider {
+    try {
+        def output = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-parse', '--short', 'HEAD'
+            standardOutput = output
+            errorOutput = new ByteArrayOutputStream()
+            ignoreExitValue = true
+        }
+        def value = output.toString().trim()
+        return value.isEmpty() ? '' : value
+    } catch (Exception ignored) {
+        return ''
+    }
+}
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'commit', gitCommitHash
+
+    filesMatching('META-INF/mods.toml') {
+        expand version: project.version, commit: gitCommitHash.get()
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    forge "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
+
+    // Embeddium is the required chunk renderer. Oculus is optional at runtime, but its Forge jar
+    // supplies the Iris-compatible implementation API used by the shader integration sources.
+    modImplementation "org.embeddedt:embeddium-${project.minecraft_version}:${project.embeddium_version}"
+    modCompileOnly "maven.modrinth:oculus:${project.oculus_compile_version}"
+    modCompileOnly("maven.modrinth:LNytGWDc:8amzvn9x") { transitive = false }
+    modCompileOnly("net.createmod.ponder:Ponder-Forge-1.20.1:1.0.91") { transitive = false }
+    modCompileOnly("dev.engine-room.flywheel:flywheel-forge-1.20.1:1.0.5") { transitive = false }
+
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    compileOnly 'io.github.llamalad7:mixinextras-common:0.5.4'
+    annotationProcessor 'io.github.llamalad7:mixinextras-common:0.5.4'
+    include implementation('io.github.llamalad7:mixinextras-forge:0.5.4')
+
+    implementation platform('org.lwjgl:lwjgl-bom:3.3.1')
+    implementation 'org.lwjgl:lwjgl'
+    implementation 'org.lwjgl:lwjgl-lmdb'
+    implementation 'org.lwjgl:lwjgl-zstd'
+    lwjglRuntimeBundle('org.lwjgl:lwjgl-lmdb:3.3.1') { transitive = false }
+    lwjglRuntimeBundle('org.lwjgl:lwjgl-zstd:3.3.1') { transitive = false }
+    lwjglRuntimeBundle('org.lwjgl:lwjgl-lmdb:3.3.1:natives-windows') { transitive = false }
+    lwjglRuntimeBundle('org.lwjgl:lwjgl-zstd:3.3.1:natives-windows') { transitive = false }
+    lwjglRuntimeBundle('org.lwjgl:lwjgl-lmdb:3.3.1:natives-linux') { transitive = false }
+    lwjglRuntimeBundle('org.lwjgl:lwjgl-zstd:3.3.1:natives-linux') { transitive = false }
+    lwjglRuntimeBundle('org.lwjgl:lwjgl-lmdb:3.3.1:natives-macos-arm64') { transitive = false }
+    lwjglRuntimeBundle('org.lwjgl:lwjgl-zstd:3.3.1:natives-macos-arm64') { transitive = false }
+
+    include implementation('redis.clients:jedis:5.1.0')
+    include implementation('org.rocksdb:rocksdbjni:10.2.1')
+    include implementation('org.apache.commons:commons-pool2:2.12.0')
+    implementation 'org.lz4:lz4-java:1.8.0'
+    include implementation('org.tukaani:xz:1.10')
+    include implementation('org.xerial:sqlite-jdbc:3.49.1.0')
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+    options.fork = false
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+jar {
+    destinationDirectory.set(layout.buildDirectory.dir('intermediate-jars'))
+    archiveClassifier.set('dev')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from({ configurations.lwjglRuntimeBundle.collect { zipTree(it) } }) {
+        exclude 'META-INF/MANIFEST.MF'
+        exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+        exclude 'module-info.class', 'META-INF/versions/**/module-info.class'
+    }
+    from('../../README.md')
+}
+
+tasks.named('remapJar') {
+    destinationDirectory.set(layout.buildDirectory.dir('intermediate-jars'))
+    archiveClassifier.set('unoptimized')
+}
+
+def slimJarOutput = layout.buildDirectory.file(
+        "libs/${project.archives_base_name}-${project.mod_version}-mc1.20.1-forge-client.jar")
+
+tasks.register('slimJar') {
+    group = 'build'
+    description = 'Creates the Windows and Linux x86_64 and macOS ARM64 distributable JAR'
+    dependsOn tasks.named('remapJar')
+
+    def sourceJar = tasks.named('remapJar').flatMap { it.archiveFile }
+    inputs.file(sourceJar)
+    outputs.file(slimJarOutput)
+
+    doLast {
+        def source = sourceJar.get().asFile
+        def target = slimJarOutput.get().asFile
+        target.parentFile.mkdirs()
+
+        def putEntry = { java.util.zip.ZipOutputStream output, String name, byte[] data,
+                         int requestedMethod, long timestamp ->
+            def entry = new java.util.zip.ZipEntry(name)
+            if (timestamp >= 0L) entry.time = timestamp
+            entry.method = requestedMethod == java.util.zip.ZipEntry.STORED
+                    ? java.util.zip.ZipEntry.STORED : java.util.zip.ZipEntry.DEFLATED
+            if (entry.method == java.util.zip.ZipEntry.STORED) {
+                def crc = new java.util.zip.CRC32()
+                crc.update(data)
+                entry.size = data.length
+                entry.compressedSize = data.length
+                entry.crc = crc.value
+            }
+            output.putNextEntry(entry)
+            if (data.length != 0) output.write(data)
+            output.closeEntry()
+        }
+
+        def rewriteNested = { byte[] inputBytes, Closure<Boolean> shouldDrop ->
+            def bytesOut = new ByteArrayOutputStream(inputBytes.length)
+            new java.util.zip.ZipInputStream(new ByteArrayInputStream(inputBytes)).withCloseable { input ->
+                new java.util.zip.ZipOutputStream(bytesOut).withCloseable { output ->
+                    java.util.zip.ZipEntry entry
+                    while ((entry = input.nextEntry) != null) {
+                        byte[] data = entry.directory ? new byte[0] : input.readAllBytes()
+                        if (!shouldDrop.call(entry.name)) {
+                            putEntry(output, entry.name, data, entry.method, entry.time)
+                        }
+                        input.closeEntry()
+                    }
+                }
+            }
+            bytesOut.toByteArray()
+        }
+
+        def rocksKeep = ['librocksdbjni-win64.dll', 'librocksdbjni-linux64.so',
+                         'librocksdbjni-osx-arm64.jnilib'] as Set
+        def sqliteKeep = ['org/sqlite/native/windows/x86_64/',
+                          'org/sqlite/native/linux/x86_64/',
+                          'org/sqlite/native/mac/aarch64/']
+        boolean foundRocks = false
+        boolean foundSqlite = false
+        boolean foundSqliteWindows = false
+        boolean foundSqliteLinux = false
+        int removedRocksNatives = 0
+        int removedSqliteNatives = 0
+        if (target.exists() && !target.delete()) {
+            throw new GradleException("Could not replace ${target}")
+        }
+
+        new java.util.zip.ZipFile(source).withCloseable { input ->
+            new java.util.zip.ZipOutputStream(new BufferedOutputStream(new FileOutputStream(target))).withCloseable { output ->
+                def entries = input.entries()
+                while (entries.hasMoreElements()) {
+                    def entry = entries.nextElement()
+                    byte[] data = entry.directory ? new byte[0] : input.getInputStream(entry).withCloseable { it.readAllBytes() }
+                    if (entry.name.startsWith('META-INF/jars/rocksdbjni-') && entry.name.endsWith('.jar')) {
+                        foundRocks = true
+                        data = rewriteNested(data, { String nestedName ->
+                            String baseName = nestedName.substring(nestedName.lastIndexOf('/') + 1)
+                            boolean nativeFile = baseName.startsWith('librocksdbjni-') &&
+                                    (baseName.endsWith('.so') || baseName.endsWith('.dll') ||
+                                     baseName.endsWith('.jnilib') || baseName.endsWith('.dylib'))
+                            boolean drop = nativeFile && !rocksKeep.contains(baseName)
+                            if (drop) removedRocksNatives++
+                            drop
+                        })
+                    } else if (entry.name.startsWith('META-INF/jars/sqlite-jdbc-') && entry.name.endsWith('.jar')) {
+                        foundSqlite = true
+                        data = rewriteNested(data, { String nestedName ->
+                            String normalized = nestedName.replace('\\', '/').toLowerCase(Locale.ROOT)
+                            boolean nativeFile = normalized.startsWith('org/sqlite/native/') &&
+                                    !normalized.endsWith('/')
+                            if (normalized.startsWith(sqliteKeep[0])) foundSqliteWindows = true
+                            if (normalized.startsWith(sqliteKeep[1])) foundSqliteLinux = true
+                            boolean drop = nativeFile && !sqliteKeep.any { normalized.startsWith(it) }
+                            if (drop) removedSqliteNatives++
+                            drop
+                        })
+                    }
+                    int method = entry.name.startsWith('META-INF/jars/') && entry.name.endsWith('.jar')
+                            ? java.util.zip.ZipEntry.STORED : entry.method
+                    putEntry(output, entry.name, data, method, entry.time)
+                }
+            }
+        }
+
+        if (!foundRocks || !foundSqlite || !foundSqliteWindows || !foundSqliteLinux) {
+            target.delete()
+            throw new GradleException("Expected nested dependencies were not found " +
+                    "(rocksdb=${foundRocks}, sqlite=${foundSqlite}, " +
+                    "sqliteWindows=${foundSqliteWindows}, sqliteLinux=${foundSqliteLinux})")
+        }
+        logger.lifecycle(String.format(Locale.ROOT,
+                'Slim JAR: %.1f MiB -> %.1f MiB (%d RocksDB and %d SQLite natives removed)',
+                source.length() / 1048576.0d, target.length() / 1048576.0d,
+                removedRocksNatives, removedSqliteNatives))
+    }
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('slimJar')
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) { from components.java }
+    }
+}
+
+tasks.named('jar') {
+    manifest.attributes('MixinConnector': 'me.cortex.voxy.client.compat.seedgen.ForgeSeedGenConnector')
+}
