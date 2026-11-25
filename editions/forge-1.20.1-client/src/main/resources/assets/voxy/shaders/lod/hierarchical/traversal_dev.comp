@@ -137,8 +137,9 @@ void traverse(in UnpackedNode node) {
                 //printf("A");
                 enqueueChildren(node);
             } else {
-                //printf("B");
-                addRequest(node);
+                // A node with no known descendants can only expand at the root.
+                bool mayHaveChildren = (node.flags & (1u << 6u)) != 0u;
+                if (mayHaveChildren || node.lodLevel == MAX_ITERATIONS - 1) addRequest(node);
                 //TODO: use self mesh (is error state if it doesnt have one since all leaf nodes should have a mesh)
                 // Basicly guarenteed to have a mesh, if it doesnt it is very very bad and incorect since its a violation of the graph properties
                 // that all leaf nodes must contain a mesh

@@ -227,7 +227,8 @@ public class HierarchicalOcclusionTraverser {
             double iFillness = Math.max(0, (TARGET_COUNT - this.meshGen.getTaskCount()) / TARGET_COUNT);
             iFillness = Math.pow(iFillness, 2);
             final int requestSize = (int) Math.ceil(iFillness * MAX_REQUEST_QUEUE_SIZE);
-            MemoryUtil.memPutInt(ptr, Math.max(0, Math.min(MAX_REQUEST_QUEUE_SIZE, requestSize)));ptr += 4;
+            int limit = viewport.isShadowPass() ? 32 : MAX_REQUEST_QUEUE_SIZE;
+            MemoryUtil.memPutInt(ptr, Math.max(0, Math.min(limit, requestSize))); ptr += 4;
         }
 
         //Put the render distance here so that it can generate a correct circle, TODO: make it not top level section sized
