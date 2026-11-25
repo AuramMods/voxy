@@ -54,3 +54,9 @@ The Voxy water pass checks the opaque depth from Embeddium before applying the o
 The penumbra, ambient occlusion, and contact shadow passes now use Voxy's projection for Voxy terrain. With the same camera and daylight, a strip of the test bridge that was visibly darker than the rest of the bridge matched the surrounding blocks after shader reload.
 
 The full Auram fixture uses five chunks of near render distance and includes a pool with shallow and deep sections, a stone pillar, and a continuous bridge. The rebuilt client draws water over both pool floors from two camera positions. A temporary diagnostic color confirmed Voxy water coverage in front of Embeddium's opaque depth. The water change requires the rebuilt jar and a client restart.
+
+## Sky-colored disc below the camera
+
+Bliss's border fog used the straight-line distance to the camera. The vertical distance could push nearby water into full fog, replacing its color and reflections with the sky color. The near and deferred passes now measure horizontal distance and use Voxy's render range when it is active. Distant Horizons retains its original radial fade.
+
+In the copied Auram world, disabling border fog removed the disc around the ship at the original camera position. The patch removed it with border fog enabled at Y 142 and Y 170. Oculus picked up the change on shader reload.
