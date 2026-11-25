@@ -40,3 +40,9 @@ The water passes now reconstruct both the Voxy water surface and the opaque terr
 AuramBliss opts into Voxy's water overlap through `voxy.json`. Voxy uses Bliss's dither pattern across the overlap band for top faces of water. The near pass checks the Voxy front and opaque depths before yielding a pixel, so a distinct surface can still render. Near water gradually reduces its screen-space reflections as the distant pass takes over, and both passes use the same wave strength.
 
 Water reflections map the reflected ray to the lowest cloud layer and aim the camera-centered sky lookup at that point. Both passes also use the sky atlas's vertical coordinate convention. The Mac pond fixture crosses the near render boundary and was checked from two heights. A temporary diagnostic color confirmed that Voxy draws water inside the near section bounds. The overlap requires the matching Voxy jar and a client restart.
+
+## Lighting across the terrain boundary
+
+Voxy converts lightmap sample centers to the same normalized levels as near terrain. Near and distant foliage share the same subsurface-scattering assignments. Voxy now writes raw specular channels to `colortex8` for the compatibility pass to pack, and the lighting pass reconstructs Voxy receivers at their actual depth.
+
+The spruce panel fixture and open terrain were checked across shader reloads. The distant bridge still differed in brightness at the geometry boundary. Opaque terrain continues to switch renderers at the section boundary.
