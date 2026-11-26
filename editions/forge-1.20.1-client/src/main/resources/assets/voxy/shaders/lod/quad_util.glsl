@@ -147,18 +147,23 @@ float coarseFluidTopIndentation(BlockModel model, float lodScale) {
     return (1.0 - modelFluidHeight(model)) / lodScale;
 }
 
-float resolveFluidTopIndentation(BlockModel model, uint face, float bakedIndentation, float localY, float lodScale, ivec3 lodPos, uint lodLevel) {
-    if (face != 1u || !modelIsVanillaFluid(model)) return bakedIndentation;
+float resolveFluidDatumHeight(float localY, float lodScale, ivec3 lodPos, uint lodLevel) {
+    float coarseBottom = localY * lodScale + float((lodPos.y << lodLevel) << 5);
+    float height = (fluidDatumY - coarseBottom) / lodScale;
+    return height > 0.0 && height <= 1.0 ? max(height, 2.0 / 64.0) : 0.0;
+}
 
-    if (lodLevel > 0u && modelUsesFluidDatum(model)) {
-        float coarseBottom = localY * lodScale + float((lodPos.y << lodLevel) << 5);
-        float datumPosition = (fluidDatumY - coarseBottom) / lodScale;
-        if (datumPosition > 0.0 && datumPosition <= 1.0) {
-            return clamp(1.0 - datumPosition, 0.0, 62.0 / 64.0);
+vec4 alignFluidSideToDatum(vec4 heights, uint face, float datumHeight) {
+    // For both horizontal axes, a stacked water column reports two full top
+    // corners. Its wall must reach the cell above.
+    if (face >= 4u) {
+        if (min(heights.z, heights.w) < 1.0) {
+            return vec4(min(heights.xy, vec2(datumHeight)), vec2(datumHeight));
         }
+    } else if (min(heights.y, heights.w) < 1.0) {
+        return vec4(min(heights.x, datumHeight), datumHeight, min(heights.z, datumHeight), datumHeight);
     }
-
-    return coarseFluidTopIndentation(model, lodScale);
+    return heights;
 }
 
 vec4 resolveFluidSideSize(BlockModel model, const in Quad rawQuad, uint face, vec4 faceSize, float lodScale, uint lodLevel, bool fluidShape) {
@@ -232,10 +237,15 @@ void setupQuad(out QuadData quad, const in Quad rawQuad, uvec2 sPos, bool genera
     quad.fluidShape = fluidShape ? 1u : 0u;
     quad.fluidCornerHeights = fluidShape ? decodeFluidCorners(rawQuad, lodScale) : vec4(0.0);
     quad.fluidBaseY = quadStart.y * lodScale + float(baseSection.y << 5);
-    float depthOffset = resolveFluidTopIndentation(
-            model, face, extractFaceIndentation(faceData), quadStart.y, lodScale, lodPos, lodLevel);
-    if (fluidShape && face == 1u && lodLevel > 0u && modelUsesFluidDatum(model)) {
-        quad.fluidCornerHeights = vec4(1.0 - depthOffset);
+    bool coarseWater = lodLevel > 0u && modelUsesFluidDatum(model);
+    float datumHeight = coarseWater && (face == 1u || fluidShape)
+            ? resolveFluidDatumHeight(quadStart.y, lodScale, lodPos, lodLevel) : 0.0;
+    float depthOffset = extractFaceIndentation(faceData);
+    if (face == 1u && modelIsVanillaFluid(model)) {
+        depthOffset = datumHeight > 0.0 ? 1.0 - datumHeight : coarseFluidTopIndentation(model, lodScale);
+        if (fluidShape && coarseWater) quad.fluidCornerHeights = vec4(1.0 - depthOffset);
+    } else if (fluidShape && datumHeight > 0.0) {
+        quad.fluidCornerHeights = alignFluidSideToDatum(quad.fluidCornerHeights, face, datumHeight);
     }
     if (fluidShape) depthOffset = 0.0;
     quadStart += swizzelDataAxis(face>>1, vec3(faceSize.xz, mix(depthOffset, 1-depthOffset, float(face&1u))));
