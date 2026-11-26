@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 import me.cortex.voxy.common.config.section.LodSectionStorage;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.network.LodChannel;
+import me.cortex.voxy.common.voxelization.VoxelizedSection;
 import me.cortex.voxy.common.world.WorldEngine;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -48,6 +50,8 @@ public final class ServerLodService implements AutoCloseable {
     final UUID worldId;
     private final Map<ResourceKey<Level>, Dimension> worlds = new ConcurrentHashMap<>();
     private final AtomicReference<LocalLodTerrain> localTerrain = new AtomicReference<>();
+    // Enough for four normal Overworld columns. Retained scratch is bounded to about 3.5 MiB.
+    private final ArrayBlockingQueue<VoxelizedSection> voxelBuffers = new ArrayBlockingQueue<>(96);
     private final ThreadPoolExecutor worker;
     private final ServerLodGenerator generator;
     private final ServerLodEdits edits;
@@ -78,6 +82,10 @@ public final class ServerLodService implements AutoCloseable {
 
     ServerVoxyConfig config() {
         return this.config;
+    }
+
+    ServerChunkSnapshot.Prepared voxelize(ServerChunkSnapshot snapshot, Dimension dimension) {
+        return snapshot.voxelize(dimension.world().getMapper(), this.voxelBuffers);
     }
 
     Dimension dimension(ServerLevel level) {

@@ -29,6 +29,7 @@ import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
 
 import java.util.Optional;
+import java.util.concurrent.ArrayBlockingQueue;
 
 /** Only owned palettes and lights cross from the chunk lifecycle into the Voxy storage worker. */
 record ServerChunkSnapshot(ChunkPos position, int minSection, Section[] sections) {
@@ -39,7 +40,36 @@ record ServerChunkSnapshot(ChunkPos position, int minSection, Section[] sections
     record Section(PalettedContainer<BlockState> blocks, PalettedContainerRO<Holder<Biome>> biomes,
                    ILightingSupplier light) {}
 
-    record Prepared(ChunkPos position, VoxelizedSection[] sections) {}
+    static final class Prepared implements AutoCloseable {
+        private final ChunkPos position;
+        private final VoxelizedSection[] sections;
+        private final ArrayBlockingQueue<VoxelizedSection> buffers;
+
+        private Prepared(ChunkPos position, int count, ArrayBlockingQueue<VoxelizedSection> buffers) {
+            this.position = position;
+            this.sections = new VoxelizedSection[count];
+            this.buffers = buffers;
+        }
+
+        ChunkPos position() {
+            return this.position;
+        }
+
+        VoxelizedSection[] sections() {
+            return this.sections;
+        }
+
+        @Override
+        public void close() {
+            for (int i = 0; i < this.sections.length; i++) {
+                var section = this.sections[i];
+                if (section != null) {
+                    this.sections[i] = null;
+                    this.buffers.offer(section);
+                }
+            }
+        }
+    }
 
     static ServerChunkSnapshot fromLive(ServerLevel level, LevelChunk chunk) {
         var position = chunk.getPos();
@@ -151,15 +181,22 @@ record ServerChunkSnapshot(ChunkPos position, int minSection, Section[] sections
         return heights;
     }
 
-    Prepared voxelize(Mapper mapper) {
-        var prepared = new VoxelizedSection[this.sections.length];
-        for (int i = 0; i < prepared.length; i++) {
-            var section = this.sections[i];
-            var voxels = VoxelizedSection.createEmpty().setPosition(this.position.x, this.minSection + i, this.position.z);
-            WorldConversionFactory.convert(voxels, mapper, section.blocks(), section.biomes(), section.light());
-            WorldVoxilizedSectionMipper.mipSection(voxels, mapper);
-            prepared[i] = voxels;
+    Prepared voxelize(Mapper mapper, ArrayBlockingQueue<VoxelizedSection> buffers) {
+        var prepared = new Prepared(this.position, this.sections.length, buffers);
+        try {
+            for (int i = 0; i < this.sections.length; i++) {
+                var section = this.sections[i];
+                var voxels = buffers.poll();
+                if (voxels == null) voxels = VoxelizedSection.createEmpty();
+                prepared.sections[i] = voxels.setPosition(this.position.x, this.minSection + i, this.position.z);
+                // The converter overwrites the base level, including empty sections, and the mipper fills the rest.
+                WorldConversionFactory.convert(voxels, mapper, section.blocks(), section.biomes(), section.light());
+                WorldVoxilizedSectionMipper.mipSection(voxels, mapper);
+            }
+            return prepared;
+        } catch (RuntimeException | Error ex) {
+            prepared.close();
+            throw ex;
         }
-        return new Prepared(this.position, prepared);
     }
 }

@@ -189,11 +189,12 @@ final class ServerLodEdits {
         }
         edit.write = snapshot.thenApplyAsync(data -> {
             if (edit.stamp != stamp || edit.relit.get()) return null;
-            var prepared = data.voxelize(dimension.world().getMapper());
-            synchronized (dimension) {
-                if (edit.stamp != stamp || edit.relit.get()) return null;
-                return ServerColumnWriter.commit(dimension.world(), dimension.storage(), prepared,
-                        () -> edit.stamp == stamp && !edit.relit.get());
+            try (var prepared = this.service.voxelize(data, dimension)) {
+                synchronized (dimension) {
+                    if (edit.stamp != stamp || edit.relit.get()) return null;
+                    return ServerColumnWriter.commit(dimension.world(), dimension.storage(), prepared,
+                            () -> edit.stamp == stamp && !edit.relit.get());
+                }
             }
         }, this.worker);
         this.inFlight++;
