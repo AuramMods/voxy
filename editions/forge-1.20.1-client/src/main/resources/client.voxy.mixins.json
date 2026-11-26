@@ -45,6 +45,7 @@
     // "minecraft.MixinGlDebug",
     "minecraft.MixinLevelRenderer",
     "minecraft.MixinMinecraft",
+    "minecraft.MixinAnimatedSpriteTexture",
     "minecraft.MixinNativeImage",
     "minecraft.MixinRenderSystem",
     "minecraft.MixinTextureAtlas",
