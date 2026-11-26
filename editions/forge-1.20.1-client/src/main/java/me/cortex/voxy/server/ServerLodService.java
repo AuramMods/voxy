@@ -128,7 +128,7 @@ public final class ServerLodService implements AutoCloseable {
         var dimension = this.dimension(key);
         try {
             var terrain = new LocalLodTerrain(key, LodSectionStorage.openReadOnly(this.storagePath(key)),
-                    dimension.world().getMapper(), this.localTerrain);
+                    dimension.world().getMapper(), this.localTerrain, this.worker);
             this.localTerrain.set(terrain);
             Logger.info("Reading Voxy LODs directly from the local save for " + key.location());
             return terrain;
@@ -180,7 +180,7 @@ public final class ServerLodService implements AutoCloseable {
     void publishLocal(ServerLevel level, long[] changed) {
         var terrain = this.localTerrain.get();
         if (terrain != null && terrain.dimension().equals(level.dimension()) && changed.length != 0) {
-            this.worker.execute(() -> terrain.refresh(changed));
+            terrain.queueRefresh(changed);
         }
     }
 
@@ -261,6 +261,8 @@ public final class ServerLodService implements AutoCloseable {
     @Override
     public void close() {
         this.generator.close();
+        var terrain = this.localTerrain.get();
+        if (terrain != null) terrain.stopUpdates();
         this.edits.flush(this.server.getTickCount());
         this.worker.shutdown();
         try {

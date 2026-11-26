@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import me.cortex.voxy.common.world.LodSectionSnapshot;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
+import me.cortex.voxy.common.world.WorldUpdater;
 
 import java.util.function.BooleanSupplier;
 
@@ -12,7 +13,7 @@ import java.util.function.BooleanSupplier;
 final class ServerColumnWriter {
     private ServerColumnWriter() {}
 
-    static long[] commit(WorldEngine world, LodSectionStorage storage, ServerChunkSnapshot chunk,
+    static long[] commit(WorldEngine world, LodSectionStorage storage, ServerChunkSnapshot.Prepared chunk,
             BooleanSupplier stillCurrent) {
         var changed = new Long2ObjectOpenHashMap<WorldSection>();
         world.setDirtyCallback((section, flags, neighbors) -> {
@@ -20,7 +21,7 @@ final class ServerColumnWriter {
         });
         boolean committed = false;
         try {
-            chunk.insertInto(world);
+            for (var section : chunk.sections()) WorldUpdater.insertUpdate(world, section);
             var snapshots = changed.values().stream().map(LodSectionSnapshot::capture).toList();
             if (!stillCurrent.getAsBoolean()) return null;
             storage.commitColumn(chunk.position().toLong(), snapshots);

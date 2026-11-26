@@ -27,6 +27,8 @@ When nobody is online, Voxy fills the spawn radius of the first available dimens
 
 The server switches job limits as players join or leave. Previously started work can finish when the limit drops. With generation enabled, Voxy can backfill up to two saved columns concurrently while it searches for and generates missing terrain. The generation job limit controls Voxy's outstanding work. Minecraft manages the actual world-generation threads and can load dependency chunks for each Voxy ticket.
 
+Once a Minecraft column is available, Voxy workers convert it to voxels and build its mip levels in parallel with other columns. Each dimension merges and commits one column at a time. Singleplayer combines repeated refreshes of the same section before reading it from the local database.
+
 In singleplayer, the top-right F3 panel shows the share of Minecraft's background worker capacity executing chunk generation, lighting, or load preparation. The count reflects the local server's Minecraft pool.
 
 ## Persistence and reconnects

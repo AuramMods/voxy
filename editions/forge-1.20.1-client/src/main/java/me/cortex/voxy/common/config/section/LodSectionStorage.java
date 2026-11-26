@@ -7,6 +7,8 @@ import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import org.sqlite.SQLiteConfig;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -25,6 +27,8 @@ import java.util.zip.InflaterInputStream;
 
 /** One dimension's headless section store. Column coverage and its revised LODs commit together. */
 public final class LodSectionStorage extends SectionStorage implements AutoCloseable {
+    private static final int SECTION_IO_BUFFER_SIZE = 32 * 1024;
+
     public record Revision(long number, LodSectionSnapshot section) {}
     public record TileVersion(long revision, long content) {}
     public record WireTile(TileVersion version, byte[] data) {}
@@ -386,7 +390,7 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
 
     private static byte[] encode(LodSectionSnapshot section) throws IOException {
         var bytes = new ByteArrayOutputStream();
-        try (var output = new DataOutputStream(new DeflaterOutputStream(bytes))) {
+        try (var output = new DataOutputStream(new BufferedOutputStream(new DeflaterOutputStream(bytes), SECTION_IO_BUFFER_SIZE))) {
             var coverage = section.coverage();
             output.writeByte(section.children());
             output.writeByte(coverage.mode());
@@ -397,7 +401,8 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
     }
 
     private static LodSectionSnapshot decode(long key, byte[] data) throws IOException {
-        try (var input = new DataInputStream(new InflaterInputStream(new ByteArrayInputStream(data)))) {
+        try (var input = new DataInputStream(new BufferedInputStream(
+                new InflaterInputStream(new ByteArrayInputStream(data)), SECTION_IO_BUFFER_SIZE))) {
             int level = WorldEngine.getLevel(key);
             byte children = input.readByte();
             SurfaceDataCoverage coverage = switch (input.readUnsignedByte()) {

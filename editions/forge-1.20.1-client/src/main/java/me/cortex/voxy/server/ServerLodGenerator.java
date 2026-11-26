@@ -388,10 +388,11 @@ final class ServerLodGenerator {
         var level = job.target.anchor().level();
         long key = job.target.position().toLong();
         job.write = CompletableFuture.supplyAsync(() -> {
-            var snapshot = prepare.get();
+            if (this.service.pendingEdit(level, key)) return null;
+            var column = prepare.get().voxelize(job.dimension.world().getMapper());
             synchronized (job.dimension) {
                 if (job.dimension.storage().hasColumn(key) || this.service.pendingEdit(level, key)) return null;
-                return ServerColumnWriter.commit(job.dimension.world(), job.dimension.storage(), snapshot,
+                return ServerColumnWriter.commit(job.dimension.world(), job.dimension.storage(), column,
                         () -> !this.service.pendingEdit(level, key));
             }
         }, this.worker);

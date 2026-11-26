@@ -5,8 +5,7 @@ import me.cortex.voxy.common.voxelization.ILightingSupplier;
 import me.cortex.voxy.common.voxelization.VoxelizedSection;
 import me.cortex.voxy.common.voxelization.WorldConversionFactory;
 import me.cortex.voxy.common.voxelization.WorldVoxilizedSectionMipper;
-import me.cortex.voxy.common.world.WorldEngine;
-import me.cortex.voxy.common.world.WorldUpdater;
+import me.cortex.voxy.common.world.other.Mapper;
 import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
@@ -39,6 +38,8 @@ record ServerChunkSnapshot(ChunkPos position, int minSection, Section[] sections
 
     record Section(PalettedContainer<BlockState> blocks, PalettedContainerRO<Holder<Biome>> biomes,
                    ILightingSupplier light) {}
+
+    record Prepared(ChunkPos position, VoxelizedSection[] sections) {}
 
     static ServerChunkSnapshot fromLive(ServerLevel level, LevelChunk chunk) {
         var position = chunk.getPos();
@@ -150,14 +151,15 @@ record ServerChunkSnapshot(ChunkPos position, int minSection, Section[] sections
         return heights;
     }
 
-    void insertInto(WorldEngine world) {
-        var scratch = VoxelizedSection.createEmpty();
-        for (int i = 0; i < this.sections.length; i++) {
+    Prepared voxelize(Mapper mapper) {
+        var prepared = new VoxelizedSection[this.sections.length];
+        for (int i = 0; i < prepared.length; i++) {
             var section = this.sections[i];
-            scratch.setPosition(this.position.x, this.minSection + i, this.position.z);
-            WorldConversionFactory.convert(scratch, world.getMapper(), section.blocks(), section.biomes(), section.light());
-            WorldVoxilizedSectionMipper.mipSection(scratch, world.getMapper());
-            WorldUpdater.insertUpdate(world, scratch);
+            var voxels = VoxelizedSection.createEmpty().setPosition(this.position.x, this.minSection + i, this.position.z);
+            WorldConversionFactory.convert(voxels, mapper, section.blocks(), section.biomes(), section.light());
+            WorldVoxilizedSectionMipper.mipSection(voxels, mapper);
+            prepared[i] = voxels;
         }
+        return new Prepared(this.position, prepared);
     }
 }

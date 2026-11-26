@@ -221,40 +221,42 @@ public class Mapper {
     }
 
     private StateEntry registerNewBlockState(BlockState state) {
+        StateEntry entry;
         this.blockLock.lock();
-        var entry = this.block2stateEntry.get(state);
-        if (entry != null) {
+        try {
+            entry = this.block2stateEntry.get(state);
+            if (entry != null) return entry;
+
+            entry = new StateEntry(this.blockId2stateEntry.size(), state);
+            // A parallel column builder can persist voxels as soon as it sees this ID.
+            this.storage.putIdMapping(entry.id | (BLOCK_STATE_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
+            this.blockId2stateEntry.add(entry);
+            this.block2stateEntry.put(state, entry);
+        } finally {
             this.blockLock.unlock();
-            return entry;
         }
 
-        entry = new StateEntry(this.blockId2stateEntry.size(), state);
-        this.blockId2stateEntry.add(entry);
-        this.block2stateEntry.put(state, entry);
-        this.blockLock.unlock();
-
-        this.storage.putIdMapping(entry.id | (BLOCK_STATE_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
-        //this.storage.flush();
-
-        if (this.newStateCallback!=null)this.newStateCallback.accept(entry);
+        var callback = this.newStateCallback;
+        if (callback != null) callback.accept(entry);
         return entry;
     }
 
     private BiomeEntry registerNewBiome(String biome) {
+        BiomeEntry entry;
+        Consumer<BiomeEntry> callback;
         this.biomeLock.lock();
-        var entry = this.biome2biomeEntry.get(biome);
-        if (entry != null) {
-            this.biomeLock.unlock();
-            return entry;
-        }
-        entry = new BiomeEntry(this.biomeId2biomeEntry.size(), biome);
-        this.biomeId2biomeEntry.add(entry);
-        this.biome2biomeEntry.put(biome, entry);
-        var callback = this.newBiomeCallback;
-        this.biomeLock.unlock();
+        try {
+            entry = this.biome2biomeEntry.get(biome);
+            if (entry != null) return entry;
 
-        this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
-        //this.storage.flush();
+            entry = new BiomeEntry(this.biomeId2biomeEntry.size(), biome);
+            this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), ByteBuffer.wrap(entry.serialize()));
+            this.biomeId2biomeEntry.add(entry);
+            this.biome2biomeEntry.put(biome, entry);
+            callback = this.newBiomeCallback;
+        } finally {
+            this.biomeLock.unlock();
+        }
 
         if (callback != null) callback.accept(entry);
         return entry;

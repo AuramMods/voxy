@@ -7,18 +7,59 @@ import me.cortex.voxy.common.world.LodSectionSnapshot;
 import me.cortex.voxy.common.world.SurfaceDataCoverage;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerSectionStorageTest {
+    @Test
+    void coalescesLocalSectionRefreshesAndStopsQueuedWorkOnClose(@TempDir Path temp) throws Exception {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        var path = temp.resolve("local.sqlite");
+        long key = WorldEngine.getWorldSectionId(0, 7, 0, -8);
+        var snapshot = new LodSectionSnapshot(key, (byte) 0, SurfaceDataCoverage.raw(0),
+                new long[WorldSection.SECTION_VOLUME]);
+        var subscription = new AtomicReference<LocalLodTerrain>();
+        var tasks = new ArrayDeque<Runnable>();
+        var observed = new ArrayList<Long>();
+        try (var writer = new LodSectionStorage(path);
+             var local = new LocalLodTerrain(Level.OVERWORLD, LodSectionStorage.openReadOnly(path), null,
+                     subscription, tasks::addLast)) {
+            subscription.set(local);
+            local.world().setDirtyCallback((section, flags, neighbors) -> observed.add(section.copyData()[0]));
+            writer.commitColumn(1, List.of(snapshot));
+            local.queueRefresh(new long[]{key});
+            snapshot.voxels()[0] = 0x1000_0000;
+            writer.commitColumn(1, List.of(snapshot));
+            local.queueRefresh(new long[]{key, key});
+            assertEquals(1, tasks.size());
+            tasks.removeFirst().run();
+            assertEquals(List.of(0x1000_0000L), observed);
+            assertTrue(tasks.isEmpty());
+
+            local.queueRefresh(new long[]{key});
+            local.stopUpdates();
+            tasks.removeFirst().run();
+            local.queueRefresh(new long[]{key});
+            assertTrue(tasks.isEmpty());
+            assertNull(subscription.get());
+            assertEquals(1, observed.size());
+        }
+    }
+
     @Test
     void readOnlyViewSeesCommitsAndSurvivesWriterClose(@TempDir Path temp) throws Exception {
         var path = temp.resolve("local.sqlite");
