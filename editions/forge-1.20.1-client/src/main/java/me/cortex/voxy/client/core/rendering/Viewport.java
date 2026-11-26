@@ -4,7 +4,12 @@ import me.cortex.voxy.client.core.RenderProperties;
 import me.cortex.voxy.client.core.gl.GlBuffer;
 import me.cortex.voxy.client.core.rendering.util.HiZBuffer;
 import net.minecraft.util.Mth;
-import org.joml.*;
+import org.joml.FrustumIntersection;
+import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
+import org.joml.Vector3f;
+import org.joml.Vector3i;
+import org.joml.Vector4f;
 
 import java.lang.reflect.Field;
 
