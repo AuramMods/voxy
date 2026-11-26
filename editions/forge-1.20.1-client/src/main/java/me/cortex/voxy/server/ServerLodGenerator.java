@@ -36,7 +36,8 @@ final class ServerLodGenerator {
         }
 
         Anchor scanKey() {
-            return this.onlineSpawn ? new Anchor(this.level, this.center, this.radius, null, false) : this;
+            // Share progress for identical terrain areas even when the scheduling priority changes.
+            return this.player == null && !this.onlineSpawn ? this : new Anchor(this.level, this.center, this.radius, null, false);
         }
 
         long distance(ChunkPos position) {
