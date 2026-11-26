@@ -63,6 +63,10 @@ bool modelIsFluid(BlockModel model) {
     return ((model.flagsA)&4096u) != 0;
 }
 
+bool modelCullsBackfaces(BlockModel model) {
+    return (model.flagsA & (1u << 14u)) != 0u;
+}
+
 float modelFluidHeight(BlockModel model) {
     // 高度占 8..11 位，12 位是流体标记。
     return float((model.flagsA >> 8u) & 15u) / 9.0;

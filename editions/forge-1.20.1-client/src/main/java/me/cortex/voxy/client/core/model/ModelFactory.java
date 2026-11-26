@@ -61,9 +61,10 @@ public class ModelFactory {
     public static final int MODEL_MIP_LEVELS = LAYERS + 1;
 
     // 模型去重键的字段顺序与 GPU 元数据写入顺序保持一致。
-    private record ModelEntry(ColourDepthTextureData down, ColourDepthTextureData up, ColourDepthTextureData north, ColourDepthTextureData south, ColourDepthTextureData west, ColourDepthTextureData east, int fluidBlockStateId, int tintingColour, boolean leafModel, boolean trackModel) {
-        public ModelEntry(ColourDepthTextureData[] textures, int fluidBlockStateId, int tintingColour, boolean leafModel, boolean trackModel) {
-            this(textures[0], textures[1], textures[2], textures[3], textures[4], textures[5], fluidBlockStateId, tintingColour, leafModel, trackModel);
+    private record ModelEntry(ColourDepthTextureData down, ColourDepthTextureData up, ColourDepthTextureData north, ColourDepthTextureData south, ColourDepthTextureData west, ColourDepthTextureData east, int fluidBlockStateId, int tintingColour, boolean leafModel, boolean trackModel, boolean cullBackfaces) {
+        public ModelEntry(ColourDepthTextureData[] textures, int fluidBlockStateId, int tintingColour, boolean leafModel, boolean trackModel, boolean cullBackfaces) {
+            this(textures[0], textures[1], textures[2], textures[3], textures[4], textures[5],
+                    fluidBlockStateId, tintingColour, leafModel, trackModel, cullBackfaces);
         }
     }
 
@@ -431,6 +432,8 @@ public class ModelFactory {
         boolean leafModel = isLeafBlockState(blockState);
         boolean balancedLeaf = leafModel
                 && VoxyConfig.CONFIG.getLeafLodMode() == VoxyConfig.LeafLodMode.BALANCED;
+        boolean cullBackfaces = layer == RenderType.translucent() && blockState.getBlock() instanceof IceBlock;
+        boolean trackModel = me.cortex.voxy.client.compat.distant.TrackLodReplacement.isTrack(blockState);
         int modelId = -1;
 
 
@@ -466,7 +469,7 @@ public class ModelFactory {
 
         ModelEntry entry;
         {//Deduplicate same entries
-            entry = new ModelEntry(textureData, clientFluidStateId, constantTint, leafModel, me.cortex.voxy.client.compat.distant.TrackLodReplacement.isTrack(blockState));
+            entry = new ModelEntry(textureData, clientFluidStateId, constantTint, leafModel, trackModel, cullBackfaces);
             int possibleDuplicate = this.modelTexture2id.getInt(entry);
             if (possibleDuplicate != -1) {//Duplicate found
                 this.idMappings[blockId] = possibleDuplicate;
@@ -698,7 +701,8 @@ public class ModelFactory {
         modelFlags |= leafModel ? 128 : 0;
         modelFlags |= fluidHeight << 8;
         modelFlags |= isFluid ? (1 << 12) : 0;
-        modelFlags |= me.cortex.voxy.client.compat.distant.TrackLodReplacement.isTrack(blockState) ? (1 << 13) : 0;
+        modelFlags |= trackModel ? (1 << 13) : 0;
+        modelFlags |= cullBackfaces ? (1 << 14) : 0;
 
         //modelFlags |= blockRenderLayer == RenderLayer.getSolid()?0:1;// should discard alpha
         MemoryUtil.memPutInt(uploadPtr, modelFlags); uploadPtr += 4;

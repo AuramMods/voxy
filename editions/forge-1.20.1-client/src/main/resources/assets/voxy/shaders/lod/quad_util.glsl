@@ -38,7 +38,8 @@ struct QuadData {
 };
 
 uint makeQuadFlags(uint faceData, uint modelId, ivec2 quadSize, const in BlockModel model, uint face) {
-    //bit: 0-use cuttout, 1-dont use mipmaps, 2|3-tint state, 4|6-face, 8|11-width, 12|15-height, 16|31-model id
+    // Bits: 0 cutout, 1 balanced leaves, 2..3 tint, 4..6 face, 7 cull backfaces,
+    // 8..11 width, 12..15 height, 16..31 model ID.
     uint flags = 0;
 
     flags |= modelId<<16;//Model id
@@ -51,11 +52,9 @@ uint makeQuadFlags(uint faceData, uint modelId, ivec2 quadSize, const in BlockMo
 
     flags |= modelUsesBalancedLeafCutout(model) ? 2u : 0u;
 
-    //TODO: remove, there is no non mip code path anymore
-    //flags |= uint(!modelHasMipmaps(model))<<1;//Not mipmaps
-
     flags |= faceTintState(faceData)<<2;
     flags |= face<<4;//Face
+    flags |= uint(modelCullsBackfaces(model)) << 7u;
 
     return flags;
 }

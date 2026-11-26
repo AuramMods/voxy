@@ -159,6 +159,11 @@ uint getFace() {
     return (interData.x>>4)&7u;
 }
 
+uint faceTowardViewer(uint face) {
+    // The index order points up on Y quads and toward the negative side on X/Z.
+    return (face & ~1u) | uint(gl_FrontFacing != (face >= 2u));
+}
+
 
 uint getModelId() {
     return interData.x>>16;
@@ -310,6 +315,10 @@ void main() {
     float lod = 0.5 * log2(max(1.0, max(dot(dx, dx), dot(dy, dy))));
     lod = min(lod, log2(faceSize));
 
+    #ifdef TRANSLUCENT
+    if ((interData.x & (1u << 7u)) != 0u && getFace() != faceTowardViewer(getFace())) discard;
+    #endif
+
     // Keep both trilinear levels inside this face. Adjacent tiles are unrelated models.
     float inset = 0.5 * exp2(ceil(lod)) / faceSize;
     vec2 filteredUV = clamp(localUV, inset, 1.0 - inset);
@@ -438,8 +447,7 @@ void main() {
     }
     #endif
 
-    uint face = getFace();
-    face ^= uint((face&1u)!=uint(gl_FrontFacing!=((face>>1)!=0u)));
+    uint face = faceTowardViewer(getFace());
     voxy_emitFragment(VoxyFragmentParameters(colour, tile, texPos, face, modelId, getLightmapUv(interData.y), tint, model.customId));
 
     #endif
