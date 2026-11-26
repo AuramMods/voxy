@@ -92,6 +92,10 @@ public final class ClientLodStream {
                 || scope != null && scope.dimension().equals(level.dimension().location()));
     }
 
+    public static long getReceivedSectionCount() {
+        return receivedTiles;
+    }
+
     public static boolean isReadingLocalTerrain() {
         var client = Minecraft.getInstance();
         return client.level != null && ServerLodService.hasLocalTerrain(client.getSingleplayerServer(),

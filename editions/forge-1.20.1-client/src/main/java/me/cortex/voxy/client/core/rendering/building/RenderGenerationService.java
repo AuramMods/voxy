@@ -15,6 +15,7 @@ import me.cortex.voxy.common.world.other.Mapper;
 import java.util.List;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.StampedLock;
 import java.util.function.Consumer;
 
@@ -27,6 +28,7 @@ public class RenderGenerationService {
     private static final int MAX_HOLDING_SECTION_COUNT = 1000;
 
     public static final AtomicInteger MESH_FAILED_COUNTER = new AtomicInteger();
+    private static final LongAdder COMPLETED_MESHES = new LongAdder();
     private static final AtomicInteger COUNTER = new AtomicInteger();
     private static final class BuildTask {
         WorldSection section;
@@ -269,7 +271,9 @@ public class RenderGenerationService {
 
         if (mesh != null) {//If the mesh is null it means it didnt finish, so dont submit
             if (this.resultConsumer != null) {
+                boolean hasGeometry = !mesh.isEmpty();
                 this.resultConsumer.accept(mesh);
+                if (hasGeometry) COMPLETED_MESHES.increment();
             } else {
                 mesh.free();
             }
@@ -344,5 +348,9 @@ public class RenderGenerationService {
 
     public int getTaskCount() {
         return this.taskQueueCount.get();
+    }
+
+    public static long getCompletedMeshCount() {
+        return COMPLETED_MESHES.sum();
     }
 }

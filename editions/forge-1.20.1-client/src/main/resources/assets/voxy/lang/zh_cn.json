@@ -1,4 +1,10 @@
 {
+  "voxy.debug.chunk_workers": "Minecraft 区块线程：",
+  "voxy.debug.chunk_worker_usage": "%s%%（%s / %s）",
+  "voxy.debug.lods": "Voxy 远景：",
+  "voxy.debug.lod_work": "%s 个任务排队，每秒 %s 个网格",
+  "voxy.debug.lod_received": "，每秒接收 %s 个区段",
+  "voxy.debug.lod_local": "，本地数据",
   "voxy.config.general": "常规",
   "voxy.config.rendering": "渲染",
   "voxy.config.rendering.shaderShadowDistance": "光影阴影距离",

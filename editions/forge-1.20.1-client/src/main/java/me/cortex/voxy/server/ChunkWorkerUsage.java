@@ -12,11 +12,7 @@ public final class ChunkWorkerUsage {
     private static final AtomicInteger BUSY = new AtomicInteger();
     private static final ThreadLocal<Boolean> IN_CHUNK_TASK = new ThreadLocal<>();
 
-    public record Sample(int busy, int total) {
-        public int percent() {
-            return Math.round(100.0f * this.busy / this.total);
-        }
-    }
+    public record Sample(int busy, int total) {}
 
     private ChunkWorkerUsage() {}
 
