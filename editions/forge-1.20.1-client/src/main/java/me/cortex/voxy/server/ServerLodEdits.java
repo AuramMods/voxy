@@ -1,5 +1,7 @@
 package me.cortex.voxy.server;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.mixin.minecraft.AccessorChunkMap;
 import net.minecraft.server.level.ServerLevel;
@@ -56,12 +58,40 @@ final class ServerLodEdits {
         for (int z = position.z - 1; z <= position.z + 1; z++) {
             for (int x = position.x - 1; x <= position.x + 1; x++) {
                 if ((x != position.x || z != position.z) && level.getChunkSource().getChunkNow(x, z) == null) continue;
-                var key = new Column(level, ChunkPos.asLong(x, z));
-                var edit = this.pending.get(key);
-                if (edit == null) this.pending.put(key, new Pending(now));
-                else edit.changed(now);
+                this.markDirty(level, ChunkPos.asLong(x, z), now);
             }
         }
+    }
+
+    void chunksChanged(ServerLevel level, LongSet changed) {
+        // Neighboring chunks can have lighting changes. Visit each unique candidate once.
+        var affected = new LongOpenHashSet(changed.size());
+        for (var it = changed.iterator(); it.hasNext();) {
+            long position = it.nextLong();
+            int centerX = ChunkPos.getX(position);
+            int centerZ = ChunkPos.getZ(position);
+            for (int z = centerZ - 1; z <= centerZ + 1; z++) {
+                for (int x = centerX - 1; x <= centerX + 1; x++) {
+                    affected.add(ChunkPos.asLong(x, z));
+                }
+            }
+        }
+
+        int now = level.getServer().getTickCount();
+        var chunks = level.getChunkSource();
+        for (var it = affected.iterator(); it.hasNext();) {
+            long position = it.nextLong();
+            if (changed.contains(position) || chunks.getChunkNow(ChunkPos.getX(position), ChunkPos.getZ(position)) != null) {
+                this.markDirty(level, position, now);
+            }
+        }
+    }
+
+    private void markDirty(ServerLevel level, long position, int now) {
+        var column = new Column(level, position);
+        var edit = this.pending.get(column);
+        if (edit == null) this.pending.put(column, new Pending(now));
+        else edit.changed(now);
     }
 
     void lightChanged(ServerLevel level, long position) {

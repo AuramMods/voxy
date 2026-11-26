@@ -107,6 +107,7 @@ dependencies {
     // supplies the Iris-compatible implementation API used by the shader integration sources.
     modImplementation "org.embeddedt:embeddium-${project.minecraft_version}:${project.embeddium_version}"
     modCompileOnly "maven.modrinth:oculus:${project.oculus_compile_version}"
+    modCompileOnly("maven.modrinth:worldedit:Wrlqaul6") { transitive = false }
     modCompileOnly("maven.modrinth:LNytGWDc:8amzvn9x") { transitive = false }
     modCompileOnly("net.createmod.ponder:Ponder-Forge-1.20.1:1.0.91") { transitive = false }
     modCompileOnly("dev.engine-room.flywheel:flywheel-forge-1.20.1:1.0.5") { transitive = false }

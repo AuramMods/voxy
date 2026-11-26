@@ -1,6 +1,7 @@
 package me.cortex.voxy.server;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import me.cortex.voxy.common.config.section.LodSectionStorage;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.network.LodChannel;
@@ -162,6 +163,14 @@ public final class ServerLodService implements AutoCloseable {
         if (service != null && level.getServer().isSameThread()) {
             service.edits.blockChanged(level, new ChunkPos(position));
         }
+    }
+
+    static void chunksChanged(ServerLevel level, LongSet positions) {
+        var server = level.getServer();
+        server.execute(() -> {
+            var service = forServer(server);
+            if (service != null) service.edits.chunksChanged(level, positions);
+        });
     }
 
     public static void lightChanged(ServerLevel level, long position) {
