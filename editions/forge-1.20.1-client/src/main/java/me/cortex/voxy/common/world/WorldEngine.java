@@ -74,16 +74,11 @@ public final class WorldEngine {
     public WorldEngine(SectionStorage storage, @Nullable VoxyInstance instance, @Nullable Mapper sharedMapper) {
         this.instanceIn = instance;
 
-        int cacheSize = 1024;
-        if (Runtime.getRuntime().maxMemory()>=(1L<<32)-(200L<<20)) {
-            cacheSize = 2048;
-        }
-
         this.storage = storage;
         this.ownsMapper = sharedMapper == null;
         this.mapper = this.ownsMapper ? new Mapper(storage) : sharedMapper;
         //5 cache size bits means that the section tracker has 32 separate maps that it uses
-        this.sectionTracker = new ActiveSectionTracker(6, storage::loadNewSection, cacheSize, this);
+        this.sectionTracker = new ActiveSectionTracker(6, storage::loadNewSection, this);
     }
 
     public WorldSection acquireIfExists(int lvl, int x, int y, int z) {
@@ -174,7 +169,21 @@ public final class WorldEngine {
     }
 
     public void addDebugData(List<String> debug) {
-        debug.add("ACC/SCC: " + this.sectionTracker.getLoadedCacheCount()+"/"+this.sectionTracker.getSecondaryCacheSize());//Active cache count, Secondary cache counts
+        var stats = this.sectionCacheStats();
+        debug.add("ACC/SCC: " + stats.active() + "/" + stats.idle()
+                + " (shared " + stats.sharedIdle() + "/" + stats.idleLimit() + ", pool " + stats.pooledArrays() + ")");
+        debug.add("Section cache active/idle/storage: " + stats.activeHits() + "/" + stats.idleHits() + "/" + stats.storageLoads());
+    }
+
+    public record SectionCacheStats(int active, int idle, int sharedIdle, int idleLimit, int pooledArrays,
+                                    long activeHits, long idleHits, long storageLoads) {}
+
+    public SectionCacheStats sectionCacheStats() {
+        return this.sectionTracker.cacheStats();
+    }
+
+    public void trimIdleSectionCache() {
+        if (this.isWorldIdle()) this.sectionTracker.clearIdleSections();
     }
 
     public int getActiveSectionCount() {
@@ -185,6 +194,7 @@ public final class WorldEngine {
         if (!this.isLive) throw new IllegalStateException();
         this.isLive = false;
         VarHandle.fullFence();
+        this.sectionTracker.clearIdleSections();
         //Cannot free while there are loaded sections
         if (this.sectionTracker.getLoadedCacheCount() != 0) {
             throw new IllegalStateException();

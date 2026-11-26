@@ -1,6 +1,5 @@
 package me.cortex.voxy.common.world;
 
-import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.world.other.Mapper;
@@ -10,9 +9,12 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.StampedLock;
 
 public final class ActiveSectionTracker {
+    private static final IdleSectionCache SHARED_IDLE_CACHE = new IdleSectionCache(
+            Runtime.getRuntime().maxMemory() >= (1L << 32) - (200L << 20) ? 2048 : 1024);
 
     //Deserialize into the supplied section, returns true on success, false on failure
     public interface SectionLoader {int load(WorldSection section);}
@@ -45,26 +47,28 @@ public final class ActiveSectionTracker {
     private final StampedLock[] locks;
     private final SectionLoader loader;
 
-    private final int lruSize;
-    private final StampedLock lruLock = new StampedLock();
-    private final Long2ObjectLinkedOpenHashMap<WorldSection> lruSecondaryCache;//TODO: THIS NEEDS TO BECOME A GLOBAL STATIC CACHE
+    private final IdleSectionCache idleCache;
+    // Accessed under the idle cache's monitor.
+    int idleSections;
+    private final LongAdder activeHits = new LongAdder();
+    private final LongAdder idleHits = new LongAdder();
+    private final LongAdder storageLoads = new LongAdder();
 
     @Nullable
     public final WorldEngine engine;
 
-    public ActiveSectionTracker(int numSlicesBits, SectionLoader loader, int cacheSize) {
-        this(numSlicesBits, loader, cacheSize, null);
+    ActiveSectionTracker(int numSlicesBits, SectionLoader loader, WorldEngine engine) {
+        this(numSlicesBits, loader, engine, SHARED_IDLE_CACHE);
     }
 
     @SuppressWarnings("unchecked")
-    public ActiveSectionTracker(int numSlicesBits, SectionLoader loader, int cacheSize, WorldEngine engine) {
+    ActiveSectionTracker(int numSlicesBits, SectionLoader loader, @Nullable WorldEngine engine, IdleSectionCache idleCache) {
         this.engine = engine;
 
         this.loader = loader;
         this.loadedSectionCache = new Long2ObjectOpenHashMap[1<<numSlicesBits];
-        this.lruSecondaryCache = new Long2ObjectLinkedOpenHashMap<>(cacheSize);
+        this.idleCache = idleCache;
         this.locks = new StampedLock[1<<numSlicesBits];
-        this.lruSize = cacheSize;
         for (int i = 0; i < this.loadedSectionCache.length; i++) {
             this.loadedSectionCache[i] = new Long2ObjectOpenHashMap<>(1024);
             this.locks[i] = new StampedLock();
@@ -111,6 +115,7 @@ public final class ActiveSectionTracker {
                     section = holder.obj;
                     if (section != null) {
                         section.acquire();
+                        this.activeHits.increment();
                         lock.unlockRead(stamp);
                         stamp = 0;
                         return section;
@@ -165,12 +170,16 @@ public final class ActiveSectionTracker {
             }
             section = holder.obj;
             if ((int) VolatileHolder.POST_ACQUIRE_COUNT.getAndAdd(holder, -1) > 0) {
+                this.activeHits.increment();
                 return section;
             }
             // 迟到等待者须核对 holder 身份，避免拿到下一轮尚未发布的 LRU 复用对象。
             long stamp = lock.readLock();
             try {
-                if (cache.get(key) == holder && section.tryAcquire()) return section;
+                if (cache.get(key) == holder && section.tryAcquire()) {
+                    this.activeHits.increment();
+                    return section;
+                }
             } finally {
                 lock.unlockRead(stamp);
             }
@@ -179,25 +188,16 @@ public final class ActiveSectionTracker {
 
         this.loadedSections.incrementAndGet();
         try {
-            WorldSection removal = null;
-            long lruStamp = this.lruLock.writeLock();
-            try {
-                section = this.lruSecondaryCache.remove(key);
-                if (section == null && !this.lruSecondaryCache.isEmpty()
-                        && this.lruSize + 100 < this.lruSecondaryCache.size() + this.getLoadedCacheCount()) {
-                    removal = this.lruSecondaryCache.removeFirst();
-                }
-            } finally {
-                this.lruLock.unlockWrite(lruStamp);
-            }
-            if (removal != null) removal._releaseArray();
+            section = this.idleCache.take(this, key);
 
             int status = 0;
             if (section != null) {
                 section.primeForReuse();
+                this.idleHits.increment();
             } else {
                 section = new WorldSection(WorldEngine.getLevel(key), WorldEngine.getX(key),
                         WorldEngine.getY(key), WorldEngine.getZ(key), this);
+                this.storageLoads.increment();
                 status = this.loader.load(section);
                 if (status < 0) {
                     Logger.error("Unable to load section " + section.key + " setting to air");
@@ -339,40 +339,13 @@ public final class ActiveSectionTracker {
                 }
             }
 
-            WorldSection aa = null;
-            if (sec != null && (hints & WorldSection.RELEASE_HINT_DONT_CACHE) != 0) {
-                lock.unlockWrite(stamp);
-                stamp = 0;
-                aa = sec;
-            } else if (sec != null) {
-                long stamp2 = this.lruLock.writeLock();
-                try {
-                    lock.unlockWrite(stamp);
-                    stamp = 0;
-                    WorldSection a = this.lruSecondaryCache.put(section.key, section);
-                    if (a != null) {
-                        throw new IllegalStateException("duplicate sections in cache is impossible");
-                    }
-                    //If cache is bigger than its ment to be, remove the least recently used and free it
-                    if (this.lruSize < this.lruSecondaryCache.size()) {
-                        aa = this.lruSecondaryCache.removeFirst();
-                    }
-                } finally {
-                    this.lruLock.unlockWrite(stamp2);
-                }
-
-
-            } else {
-                lock.unlockWrite(stamp);
-                stamp = 0;
-            }
-
-
-            if (aa != null) {
-                aa._releaseArray();
-            }
-
             if (sec != null) {
+                // Keep the slice locked until the section is visible in the shared cache.
+                if ((hints & WorldSection.RELEASE_HINT_DONT_CACHE) == 0) {
+                    this.idleCache.add(sec);
+                } else {
+                    sec._releaseArray();
+                }
                 this.loadedSections.decrementAndGet();
             }
         } finally {
@@ -396,9 +369,13 @@ public final class ActiveSectionTracker {
         return this.loadedSections.get();
     }
 
-    public int getSecondaryCacheSize() {
-        return this.lruSecondaryCache.size();
+    void clearIdleSections() {
+        this.idleCache.removeAll(this);
     }
 
-
+    WorldEngine.SectionCacheStats cacheStats() {
+        return new WorldEngine.SectionCacheStats(this.getLoadedCacheCount(),
+                this.idleCache.size(this), this.idleCache.size(), this.idleCache.capacity(),
+                WorldSection.getPooledArrayCount(), this.activeHits.sum(), this.idleHits.sum(), this.storageLoads.sum());
+    }
 }

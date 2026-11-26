@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @Mod.EventBusSubscriber(modid = "voxy", bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class ServerLodService implements AutoCloseable {
+    private static final boolean REPORT_SECTION_CACHE = Boolean.getBoolean("voxy.reportSectionCache");
     record Dimension(WorldEngine world, LodSectionStorage storage) {}
 
     private static volatile ServerLodService current;
@@ -226,6 +227,9 @@ public final class ServerLodService implements AutoCloseable {
         service.resizeWorkers(jobs);
         service.generator.tick(playersOnline, jobs);
         service.streams.tick();
+        if (event.getServer().getTickCount() % 200 == 0) {
+            for (var dimension : service.worlds.values()) dimension.world().trimIdleSectionCache();
+        }
         long now = System.nanoTime();
         long elapsed = now - service.lastReport;
         if (elapsed >= TimeUnit.SECONDS.toNanos(60)) {
@@ -235,6 +239,14 @@ public final class ServerLodService implements AutoCloseable {
                     "Voxy LODs %.2f chunks/s (%d generated, %d reused), generating %s, %d active tickets",
                     perSecond, progress.generated(), progress.imported(),
                     progress.generating().isEmpty() ? "idle" : progress.generating(), progress.tickets()));
+            if (REPORT_SECTION_CACHE) {
+                service.worlds.forEach((key, dimension) ->
+                        Logger.info("Section cache server", key.location(), dimension.world().sectionCacheStats()));
+                var terrain = service.localTerrain.get();
+                if (terrain != null) {
+                    Logger.info("Section cache client", terrain.dimension().location(), terrain.world().sectionCacheStats());
+                }
+            }
             service.lastReport = now;
         }
     }

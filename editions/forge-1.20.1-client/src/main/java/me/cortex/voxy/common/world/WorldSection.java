@@ -35,9 +35,7 @@ public final class WorldSection {
     }
 
 
-    //TODO: should make it dynamically adjust the size allowance based on memory pressure/WorldSection allocation rate (e.g. is it doing a world import)
-    private static final int ARRAY_REUSE_CACHE_SIZE = 400;//500;//32*32*32*8*ARRAY_REUSE_CACHE_SIZE == number of bytes
-    //TODO: maybe just swap this to a ConcurrentLinkedDeque
+    private static final int ARRAY_REUSE_CACHE_SIZE = 128;
     private static final AtomicInteger ARRAY_REUSE_CACHE_COUNT = new AtomicInteger(0);
     private static final ConcurrentLinkedDeque<long[]> ARRAY_REUSE_CACHE = new ConcurrentLinkedDeque<>();
 
@@ -191,11 +189,16 @@ public final class WorldSection {
         if (VERIFY_WORLD_SECTION_EXECUTION && this.data == null) {
             throw new IllegalStateException();
         }
-        if (ARRAY_REUSE_CACHE_COUNT.get() < ARRAY_REUSE_CACHE_SIZE) {
+        if (ARRAY_REUSE_CACHE_COUNT.incrementAndGet() <= ARRAY_REUSE_CACHE_SIZE) {
             ARRAY_REUSE_CACHE.add(this.data);
-            ARRAY_REUSE_CACHE_COUNT.incrementAndGet();
+        } else {
+            ARRAY_REUSE_CACHE_COUNT.decrementAndGet();
         }
         this.data = null;
+    }
+
+    static int getPooledArrayCount() {
+        return ARRAY_REUSE_CACHE_COUNT.get();
     }
 
 
