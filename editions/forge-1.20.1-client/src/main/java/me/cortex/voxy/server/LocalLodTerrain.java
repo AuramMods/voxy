@@ -77,19 +77,7 @@ public final class LocalLodTerrain implements AutoCloseable {
         if (!this.active) return;
         for (long key : changed) {
             try {
-                var section = this.world.acquire(key);
-                try {
-                    synchronized (section) {
-                        byte previous = section.getNonEmptyChildren();
-                        if (this.world.storage.loadSection(section) == 0) {
-                            int flags = WorldEngine.UPDATE_TYPE_BLOCK_BIT | WorldEngine.UPDATE_TYPE_DONT_SAVE;
-                            if (previous != section.getNonEmptyChildren()) flags |= WorldEngine.UPDATE_TYPE_CHILD_EXISTENCE_BIT;
-                            this.world.markDirty(section, flags, WorldEngine.ALL_MESH_NEIGHBORS);
-                        }
-                    }
-                } finally {
-                    section.release();
-                }
+                this.world.refreshFromStorage(key);
             } catch (RuntimeException failure) {
                 Logger.warn("Could not refresh local Voxy section " + WorldEngine.pprintPos(key)
                         + " in " + this.dimension.location(), failure);

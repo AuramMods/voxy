@@ -242,6 +242,10 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
     }
 
     public Revision read(long key) {
+        return this.read(key, null);
+    }
+
+    private Revision read(long key, long[] destination) {
         byte[] data;
         long revision;
         synchronized (this) {
@@ -257,7 +261,7 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
             }
         }
         try {
-            return new Revision(revision, decode(key, data));
+            return new Revision(revision, decode(key, data, destination));
         } catch (IOException ex) {
             throw storageFailure(ex);
         }
@@ -265,7 +269,16 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
 
     @Override
     public int loadSection(WorldSection into) {
-        var stored = this.read(into.key);
+        return this.loadSection(into, null);
+    }
+
+    @Override
+    public int loadNewSection(WorldSection into) {
+        return this.loadSection(into, into._unsafeGetRawDataArray());
+    }
+
+    private int loadSection(WorldSection into, long[] destination) {
+        var stored = this.read(into.key, destination);
         if (stored == null) return 1;
         stored.section().copyInto(into);
         return 0;
@@ -400,7 +413,7 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
         return bytes.toByteArray();
     }
 
-    private static LodSectionSnapshot decode(long key, byte[] data) throws IOException {
+    private static LodSectionSnapshot decode(long key, byte[] data, long[] destination) throws IOException {
         try (var input = new DataInputStream(new BufferedInputStream(
                 new InflaterInputStream(new ByteArrayInputStream(data)), SECTION_IO_BUFFER_SIZE))) {
             int level = WorldEngine.getLevel(key);
@@ -415,7 +428,7 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
                 }
                 default -> throw new IOException("Unknown server section coverage mode");
             };
-            long[] voxels = new long[WorldSection.SECTION_VOLUME];
+            long[] voxels = destination == null ? new long[WorldSection.SECTION_VOLUME] : destination;
             for (int i = 0; i < voxels.length; i++) voxels[i] = input.readLong();
             if (input.read() != -1) throw new IOException("Unexpected data after stored Voxy section");
             return new LodSectionSnapshot(key, children, coverage, voxels);

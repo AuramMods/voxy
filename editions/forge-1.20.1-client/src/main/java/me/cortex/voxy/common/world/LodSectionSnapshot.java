@@ -24,7 +24,9 @@ public record LodSectionSnapshot(long key, byte children, SurfaceDataCoverage co
     public void copyInto(WorldSection section) {
         if (section.key != this.key) throw new IllegalArgumentException("Section keys differ");
         synchronized (section) {
-            System.arraycopy(this.voxels, 0, section.data, 0, this.voxels.length);
+            if (this.voxels != section.data) {
+                System.arraycopy(this.voxels, 0, section.data, 0, this.voxels.length);
+            }
             section.surfaceData = this.coverage.mode() == 2
                     ? copyPartialCoverage(this.coverage) : this.coverage;
             section.legacySurfaceSource = section.lvl == 0 && this.coverage.mode() == 0;

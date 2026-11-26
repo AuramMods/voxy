@@ -17,6 +17,11 @@ public final class ActiveSectionTracker {
     //Deserialize into the supplied section, returns true on success, false on failure
     public interface SectionLoader {int load(WorldSection section);}
 
+    static final class FreshLoad {
+        // Left unset when an existing section was acquired, including another thread's load.
+        int status = -1;
+    }
+
     //Loaded section world cache, TODO: get rid of VolatileHolder and use something more sane
     private static final class VolatileHolder <T> {
         private static final VarHandle PRE_ACQUIRE_COUNT;
@@ -85,6 +90,10 @@ public final class ActiveSectionTracker {
     }
 
     public WorldSection acquire(long key, boolean nullOnEmpty) {
+        return this.acquire(key, nullOnEmpty, null);
+    }
+
+    WorldSection acquire(long key, boolean nullOnEmpty, @Nullable FreshLoad freshLoad) {
         //TODO: add optional verification check to ensure this (or other critical systems) arnt being called on the render or server thread
         if (this.engine != null) this.engine.lastActiveTime = System.currentTimeMillis();
         int index = this.getCacheArrayIndex(key);
@@ -165,7 +174,7 @@ public final class ActiveSectionTracker {
             } finally {
                 lock.unlockRead(stamp);
             }
-            return this.acquire(key, nullOnEmpty);
+            return this.acquire(key, nullOnEmpty, freshLoad);
         }
 
         this.loadedSections.incrementAndGet();
@@ -197,6 +206,7 @@ public final class ActiveSectionTracker {
                 if (status == 1) {
                     Arrays.fill(section.data, Mapper.composeMappingId((byte) 15, 0, 0));
                 }
+                if (freshLoad != null) freshLoad.status = status;
                 section.acquire(1);
             }
             int preAcquireCount = (int) VolatileHolder.PRE_ACQUIRE_COUNT.getAndSet(holder, 0);

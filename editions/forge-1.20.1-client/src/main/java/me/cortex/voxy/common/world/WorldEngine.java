@@ -83,7 +83,7 @@ public final class WorldEngine {
         this.ownsMapper = sharedMapper == null;
         this.mapper = this.ownsMapper ? new Mapper(storage) : sharedMapper;
         //5 cache size bits means that the section tracker has 32 separate maps that it uses
-        this.sectionTracker = new ActiveSectionTracker(6, storage::loadSection, cacheSize, this);
+        this.sectionTracker = new ActiveSectionTracker(6, storage::loadNewSection, cacheSize, this);
     }
 
     public WorldSection acquireIfExists(int lvl, int x, int y, int z) {
@@ -104,6 +104,28 @@ public final class WorldEngine {
     public WorldSection acquireIfExists(long pos) {
         if (!this.isLive) throw new IllegalStateException("World is not live");
         return this.sectionTracker.acquire(pos, true);
+    }
+
+    /** Publishes a committed storage update to the local renderer. */
+    public void refreshFromStorage(long key) {
+        if (!this.isLive) throw new IllegalStateException("World is not live");
+        var freshLoad = new ActiveSectionTracker.FreshLoad();
+        var section = this.sectionTracker.acquire(key, false, freshLoad);
+        try {
+            synchronized (section) {
+                byte previous = section.getNonEmptyChildren();
+                boolean loadedHere = freshLoad.status >= 0;
+                int status = loadedHere ? freshLoad.status : this.storage.loadSection(section);
+                if (status != 0) return;
+
+                int flags = UPDATE_TYPE_BLOCK_BIT | UPDATE_TYPE_DONT_SAVE;
+                // Render nodes can remember child masks even after a voxel section drops out of cache.
+                if (loadedHere || previous != section.getNonEmptyChildren()) flags |= UPDATE_TYPE_CHILD_EXISTENCE_BIT;
+                this.markDirty(section, flags, ALL_MESH_NEIGHBORS);
+            }
+        } finally {
+            section.release();
+        }
     }
 
     public static final int POS_FORMAT_VERSION = 1;

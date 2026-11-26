@@ -13,13 +13,17 @@ import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.DeflaterOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -35,11 +39,15 @@ class ServerSectionStorageTest {
         var subscription = new AtomicReference<LocalLodTerrain>();
         var tasks = new ArrayDeque<Runnable>();
         var observed = new ArrayList<Long>();
+        var observedFlags = new ArrayList<Integer>();
         try (var writer = new LodSectionStorage(path);
              var local = new LocalLodTerrain(Level.OVERWORLD, LodSectionStorage.openReadOnly(path), null,
                      subscription, tasks::addLast)) {
             subscription.set(local);
-            local.world().setDirtyCallback((section, flags, neighbors) -> observed.add(section.copyData()[0]));
+            local.world().setDirtyCallback((section, flags, neighbors) -> {
+                observed.add(section._unsafeGetRawDataArray()[0]);
+                observedFlags.add(flags);
+            });
             writer.commitColumn(1, List.of(snapshot));
             local.queueRefresh(new long[]{key});
             snapshot.voxels()[0] = 0x1000_0000;
@@ -48,7 +56,16 @@ class ServerSectionStorageTest {
             assertEquals(1, tasks.size());
             tasks.removeFirst().run();
             assertEquals(List.of(0x1000_0000L), observed);
+            assertEquals(WorldEngine.UPDATE_TYPE_BLOCK_BIT | WorldEngine.UPDATE_TYPE_DONT_SAVE
+                    | WorldEngine.UPDATE_TYPE_CHILD_EXISTENCE_BIT, observedFlags.get(0));
             assertTrue(tasks.isEmpty());
+
+            snapshot.voxels()[0] = 0x2000_0000;
+            writer.commitColumn(1, List.of(snapshot));
+            local.queueRefresh(new long[]{key});
+            tasks.removeFirst().run();
+            assertEquals(List.of(0x1000_0000L, 0x2000_0000L), observed);
+            assertEquals(WorldEngine.UPDATE_TYPE_BLOCK_BIT | WorldEngine.UPDATE_TYPE_DONT_SAVE, observedFlags.get(1));
 
             local.queueRefresh(new long[]{key});
             local.stopUpdates();
@@ -56,7 +73,58 @@ class ServerSectionStorageTest {
             local.queueRefresh(new long[]{key});
             assertTrue(tasks.isEmpty());
             assertNull(subscription.get());
-            assertEquals(1, observed.size());
+            assertEquals(2, observed.size());
+        }
+    }
+
+    @Test
+    void truncatedStorageReadDoesNotPublishOrModifyASection(@TempDir Path temp) throws Exception {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        var path = temp.resolve("local.sqlite");
+        long warmKey = WorldEngine.getWorldSectionId(0, 7, 0, -8);
+        long coldKey = WorldEngine.getWorldSectionId(0, 8, 0, -8);
+        long[] voxels = new long[WorldSection.SECTION_VOLUME];
+        voxels[0] = 0x1000_0000;
+        var warm = new LodSectionSnapshot(warmKey, (byte) 1, SurfaceDataCoverage.raw(0), voxels);
+        var cold = new LodSectionSnapshot(coldKey, (byte) 2, SurfaceDataCoverage.raw(0), voxels);
+        try (var writer = new LodSectionStorage(path);
+             var local = new LocalLodTerrain(Level.OVERWORLD, LodSectionStorage.openReadOnly(path), null,
+                     new AtomicReference<>(), Runnable::run)) {
+            writer.commitColumn(1, List.of(warm, cold));
+            var section = local.world().acquire(warmKey);
+            try {
+                var truncated = new ByteArrayOutputStream();
+                try (var out = new DataOutputStream(new DeflaterOutputStream(truncated))) {
+                    out.writeByte(4);
+                    out.writeByte(1);
+                    out.writeLong(0x2000_0000);
+                }
+                try (var connection = DriverManager.getConnection("jdbc:sqlite:" + path);
+                     var update = connection.prepareStatement("UPDATE section_v1 SET data=? WHERE id IN (?,?)")) {
+                    update.setBytes(1, truncated.toByteArray());
+                    update.setLong(2, warmKey);
+                    update.setLong(3, coldKey);
+                    assertEquals(2, update.executeUpdate());
+                }
+
+                assertThrows(IllegalStateException.class, () -> local.world().refreshFromStorage(warmKey));
+                assertEquals(0x1000_0000, section._unsafeGetRawDataArray()[0]);
+                assertEquals(1, section.getNonEmptyChildren());
+                assertThrows(IllegalStateException.class, () -> local.world().acquire(coldKey));
+                assertEquals(1, local.world().getActiveSectionCount());
+
+                writer.commitColumn(1, List.of(cold));
+                var recovered = local.world().acquire(coldKey);
+                try {
+                    assertEquals(0x1000_0000, recovered._unsafeGetRawDataArray()[0]);
+                    assertEquals(2, recovered.getNonEmptyChildren());
+                } finally {
+                    recovered.release();
+                }
+            } finally {
+                section.release();
+            }
         }
     }
 
