@@ -59,6 +59,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
     public static final int TEMPORAL_DRAW_COUNT = 100_000;
     private static final int TRANSLUCENT_OFFSET = OPAQUE_DRAW_COUNT;
     private static final int TEMPORAL_OFFSET = TRANSLUCENT_OFFSET + TRANSLUCENT_DRAW_COUNT;
+    private static final int TRANSLUCENT_DISTANCE_BUCKETS = 1024;
     private static final int STATISTICS_BUFFER_BINDING = 8;
     private static final int OPAQUE_COVERAGE_BIT = 4;
     private static final int[] CLEAR_STENCIL = {0};
@@ -88,7 +89,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         super(pipeline.properties, modelStore, geometryData);
         try {
             this.commandGenShader = Shader.make()
-                    .define("TRANSLUCENT_WRITE_BASE", 1024)
+                    .define("TRANSLUCENT_WRITE_BASE", TRANSLUCENT_DISTANCE_BUCKETS)
                     .define("TEMPORAL_OFFSET", TEMPORAL_OFFSET)
 
                     .define("TRANSLUCENT_DISTANCE_BUFFER_BINDING", 7)
@@ -99,6 +100,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
                     .add(ShaderType.COMPUTE, "voxy:lod/gl46/cmdgen.comp")
                     .compile();
             this.prepShader = Shader.make()
+                    .define("TRANSLUCENT_DISTANCE_BUCKETS", TRANSLUCENT_DISTANCE_BUCKETS)
                     .add(ShaderType.COMPUTE, "voxy:lod/gl46/prep.comp")
                     .compile();
             this.prefixSumShader = Shader.make()
@@ -108,13 +110,13 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
                     .compile();
             this.translucentGenShader = Shader.make()
                     .add(ShaderType.COMPUTE, "voxy:lod/gl46/buildtranslucents.comp")
-                    .define("TRANSLUCENT_WRITE_BASE", 1024)//The size of the prefix sum array
+                    .define("TRANSLUCENT_WRITE_BASE", TRANSLUCENT_DISTANCE_BUCKETS)
                     .define("TRANSLUCENT_DISTANCE_BUFFER_BINDING", 5)
                     .define("TRANSLUCENT_OFFSET", TRANSLUCENT_OFFSET)
 
                     .compile();
             this.uniform = new GlBuffer(1024).zero();
-            this.distanceCountBuffer = new GlBuffer(1024 * 4 + TRANSLUCENT_DRAW_COUNT * 4).zero();
+            this.distanceCountBuffer = new GlBuffer(4L * (TRANSLUCENT_DISTANCE_BUCKETS + TRANSLUCENT_DRAW_COUNT)).zero();
             this.statisticsBuffer = new GlBuffer(1024).zero();
             this.pipeline = pipeline;
             var level = Minecraft.getInstance().level;
@@ -382,13 +384,13 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, this.uniform.id);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, viewport.drawCountCallBuffer.id);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, viewport.getRenderList().id);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, this.distanceCountBuffer.id);
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
         glDispatchCompute(1, 1, 1);
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
     }
 
     private void generateDrawCalls(MDICViewport viewport) {
-        if (!viewport.isShadowPass()) this.distanceCountBuffer.zeroRange(0, 1024 * 4);
         this.commandGenShader.bind();
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, this.uniform.id);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, viewport.drawCallBuffer.id);
@@ -397,7 +399,6 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, viewport.visibilityBuffer.id);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, viewport.indirectLookupBuffer.id);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, viewport.positionScratchBuffer.id);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, this.distanceCountBuffer.id);
 
         if (RenderStatistics.enabled) {
             this.statisticsBuffer.zero();
