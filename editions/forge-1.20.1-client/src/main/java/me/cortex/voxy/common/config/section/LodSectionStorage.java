@@ -269,7 +269,13 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
 
     @Override
     public int loadSection(WorldSection into) {
-        return this.loadSection(into, null);
+        // A live section keeps its old contents until the complete stream validates.
+        long[] scratch = WorldSection.borrowVoxelArray();
+        try {
+            return this.loadSection(into, scratch);
+        } finally {
+            WorldSection.recycleVoxelArray(scratch);
+        }
     }
 
     @Override

@@ -154,13 +154,14 @@ class ServerSectionStorageTest {
         long key = WorldEngine.getWorldSectionId(4, -1, 0, 3);
         long column = 61;
         var data = new long[WorldSection.SECTION_VOLUME];
-        data[9] = 0xf0_0000_0020_0000L;
+        var random = new java.util.SplittableRandom(104729L);
+        for (int index = 0; index < data.length; index++) data[index] = random.nextLong();
         try (var store = new LodSectionStorage(path)) {
             assertFalse(store.hasColumn(column));
             assertNull(store.read(key));
             store.putIdMapping(21, ByteBuffer.wrap(new byte[]{5, 8, 13}));
             var snapshot = new LodSectionSnapshot(key, (byte) 2,
-                    SurfaceDataCoverage.legacy(4).withKnownInput(2, 0, 0), data);
+                    SurfaceDataCoverage.legacy(4).withKnownInput(2, 0, 0).withKnownInput(31, 31, 31), data);
             store.commitColumn(column, List.of(snapshot));
             assertEquals(1, store.revision(key));
             store.commitColumn(column, List.of(snapshot));
@@ -173,7 +174,8 @@ class ServerSectionStorageTest {
             var revision = store.read(key);
             assertEquals(2, revision.number());
             assertArrayEquals(data, revision.section().voxels());
-            assertEquals(1, revision.section().coverage().knownInputCount());
+            assertEquals(2, revision.section().coverage().knownInputCount());
+            assertTrue(revision.section().coverage().isKnownVoxel(WorldSection.SECTION_VOLUME - 1));
             assertArrayEquals(new byte[]{5, 8, 13}, store.getIdMappingsData().get(21));
             var positions = new ArrayList<Long>();
             store.iteratePositions(4, positions::add);

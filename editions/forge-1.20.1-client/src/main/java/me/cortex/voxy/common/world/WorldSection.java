@@ -70,12 +70,7 @@ public final class WorldSection {
         this.tracker = tracker;
         this.surfaceData = SurfaceDataCoverage.legacy(lvl);
 
-        this.data = ARRAY_REUSE_CACHE.poll();
-        if (this.data == null) {
-            this.data = new long[32 * 32 * 32];
-        } else {
-            ARRAY_REUSE_CACHE_COUNT.decrementAndGet();
-        }
+        this.data = borrowVoxelArray();
     }
 
     void primeForReuse() {
@@ -189,12 +184,26 @@ public final class WorldSection {
         if (VERIFY_WORLD_SECTION_EXECUTION && this.data == null) {
             throw new IllegalStateException();
         }
+        long[] voxels = this.data;
+        this.data = null;
+        recycleVoxelArray(voxels);
+    }
+
+    /** Borrows a whole-section buffer whose old contents must be overwritten before publication. */
+    public static long[] borrowVoxelArray() {
+        long[] voxels = ARRAY_REUSE_CACHE.poll();
+        if (voxels == null) return new long[SECTION_VOLUME];
+        ARRAY_REUSE_CACHE_COUNT.decrementAndGet();
+        return voxels;
+    }
+
+    /** Returns a buffer borrowed from the pool after its last use. */
+    public static void recycleVoxelArray(long[] voxels) {
         if (ARRAY_REUSE_CACHE_COUNT.incrementAndGet() <= ARRAY_REUSE_CACHE_SIZE) {
-            ARRAY_REUSE_CACHE.add(this.data);
+            ARRAY_REUSE_CACHE.add(voxels);
         } else {
             ARRAY_REUSE_CACHE_COUNT.decrementAndGet();
         }
-        this.data = null;
     }
 
     static int getPooledArrayCount() {
