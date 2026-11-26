@@ -11,6 +11,8 @@
     "minecraft.MixinWorld",
     "minecraft.MixinServerLevel",
     "minecraft.MixinServerChunkCache",
+    "minecraft.MixinChunkMapWorkers",
+    "minecraft.MixinNoiseChunkWorkers",
     "minecraft.AccessorChunkMap",
     "minecraft.AccessorServerChunkCache"
   ],

@@ -282,25 +282,31 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     @Override
     public String patchOpaqueShader(AbstractSectionRenderer<?, ?> renderer, String input) {
         var builder = this.buildGenericShaderHeader(renderer, input);
+        var patch = this.data.opaqueFragPatch();
 
         if (this.terrainTransition) {
             builder.insert(input.indexOf('\n') + 1, "#define VOXY_TERRAIN_TRANSITION\n");
         }
-        builder.append(this.data.opaqueFragPatch());
-
-        return builder.toString();
+        return finishFragmentPatch(builder, input, patch);
     }
 
     @Override
     public String patchTranslucentShader(AbstractSectionRenderer<?, ?> renderer, String input) {
-        if (this.data.translucentFragPatch() == null) return null;
+        var patch = this.data.translucentFragPatch();
+        if (patch == null) return null;
 
         var builder = this.buildGenericShaderHeader(renderer, input);
         if (this.waterTransition) {
             builder.insert(input.indexOf('\n') + 1, "#define VOXY_WATER_DEPTH_TEST\n");
         }
-        builder.append(this.data.translucentFragPatch());
-        return builder.toString();
+        return finishFragmentPatch(builder, input, patch);
+    }
+
+    private static String finishFragmentPatch(StringBuilder builder, String input, String patch) {
+        if (patch.contains("voxy_applyLodDebugTint(")) {
+            builder.insert(input.indexOf('\n') + 1, "#define VOXY_PACK_APPLIES_LOD_DEBUG_TINT\n");
+        }
+        return builder.append(patch).toString();
     }
 
     @Override

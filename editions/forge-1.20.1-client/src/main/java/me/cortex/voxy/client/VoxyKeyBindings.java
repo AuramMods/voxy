@@ -12,6 +12,7 @@ import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import org.lwjgl.glfw.GLFW;
 
 @Mod.EventBusSubscriber(modid = "voxy", value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class VoxyKeyBindings {
@@ -20,8 +21,14 @@ public final class VoxyKeyBindings {
             InputConstants.UNKNOWN.getValue(), CATEGORY);
     private static final KeyMapping TOGGLE_RENDERING = new KeyMapping("key.voxy.toggle_rendering", InputConstants.Type.KEYSYM,
             InputConstants.UNKNOWN.getValue(), CATEGORY);
+    private static final KeyMapping SHOW_LOD_LEVELS = new KeyMapping("key.voxy.show_lod_levels", InputConstants.Type.KEYSYM,
+            GLFW.GLFW_KEY_KP_MULTIPLY, CATEGORY);
 
     private VoxyKeyBindings() {}
+
+    public static boolean isLodTintHeld() {
+        return SHOW_LOD_LEVELS.isDown();
+    }
 
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
@@ -69,6 +76,7 @@ public final class VoxyKeyBindings {
         public static void register(RegisterKeyMappingsEvent event) {
             event.register(RELOAD);
             event.register(TOGGLE_RENDERING);
+            event.register(SHOW_LOD_LEVELS);
         }
     }
 }

@@ -5,6 +5,7 @@ import me.cortex.voxy.common.util.ExceptionCleanup;
 
 import me.cortex.voxy.client.RenderStatistics;
 import me.cortex.voxy.client.VoxyClient;
+import me.cortex.voxy.client.VoxyKeyBindings;
 import me.cortex.voxy.client.core.AbstractRenderPipeline;
 import me.cortex.voxy.client.core.IrisVoxyRenderPipeline;
 import me.cortex.voxy.client.core.rendering.hierachical.HierarchicalOcclusionTraverser;
@@ -219,6 +220,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         MemoryUtil.memPutFloat(ptr, near * near); ptr += 4;
         MemoryUtil.memPutFloat(ptr, far * far); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0); ptr += 4;
+        MemoryUtil.memPutInt(ptr, !viewport.isShadowPass() && VoxyKeyBindings.isLodTintHeld() ? 1 : 0);
         UploadStream.INSTANCE.commit();
     }
 

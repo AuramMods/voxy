@@ -10,6 +10,7 @@ layout(binding = 0, std140) uniform SceneUniform {
     uint shadowSectionLimit;
     vec4 worldCurveData;
     vec4 trackReplacement;
+    uint lodDebugTint;
 };
 
 //TODO: see if making the stride 2*4*4 bytes or something cause you get that 16 byte write

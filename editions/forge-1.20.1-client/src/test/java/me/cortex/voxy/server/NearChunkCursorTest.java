@@ -50,4 +50,38 @@ class NearChunkCursorTest {
         }
         assertEquals(29, positions.size());
     }
+
+    @Test
+    void generationFollowsTheLookDirectionWithoutSkippingNearerBands() {
+        var center = new ChunkPos(-11, 24);
+        var cursor = new GenerationChunkCursor(center, 6);
+        var south = GenerationChunkCursor.View.fromYaw(0);
+        var north = GenerationChunkCursor.View.fromYaw(180);
+
+        assertEquals(center, cursor.peek(south).position());
+        cursor.advance(center);
+        assertEquals(new ChunkPos(-11, 25), cursor.peek(south).position());
+        assertEquals(new ChunkPos(-11, 23), cursor.peek(north).position());
+
+        var seen = new HashSet<ChunkPos>();
+        int previousBand = 0;
+        var next = cursor.peek(north);
+        while (next != null) {
+            int band = (int) Math.sqrt(next.distanceSquared()) / 2;
+            assertTrue(band >= previousBand);
+            assertTrue(seen.add(next.position()));
+            previousBand = band;
+            cursor.advance(next.position());
+            next = cursor.peek(seen.size() % 2 == 0 ? north : south);
+        }
+        assertEquals(112, seen.size());
+    }
+
+    @Test
+    void nearbyPlayersHavePriorityOverTheOnlineSpawnAnchor() {
+        var center = new ChunkPos(0, 0);
+        var view = GenerationChunkCursor.View.fromYaw(90);
+        assertTrue(view.priority(center, new ChunkPos(12, 0), 144)
+                < GenerationChunkCursor.View.ONLINE_SPAWN.priority(center, center, 0));
+    }
 }

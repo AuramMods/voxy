@@ -8,6 +8,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 
@@ -28,7 +29,12 @@ import java.util.function.Supplier;
 final class ServerLodGenerator {
     record Report(int imported, int generated, Set<ResourceLocation> generating, int tickets) {}
 
-    private record Anchor(ServerLevel level, ChunkPos center, int radius) {
+    private record Anchor(ServerLevel level, ChunkPos center, int radius, ServerPlayer player, boolean onlineSpawn) {
+        GenerationChunkCursor.View view() {
+            if (this.player != null) return GenerationChunkCursor.View.fromYaw(this.player.getYRot());
+            return this.onlineSpawn ? GenerationChunkCursor.View.ONLINE_SPAWN : GenerationChunkCursor.View.OMNIDIRECTIONAL;
+        }
+
         long distance(ChunkPos position) {
             long dx = (long) this.center.x - position.x;
             long dz = (long) this.center.z - position.z;
@@ -37,7 +43,11 @@ final class ServerLodGenerator {
         }
     }
     private record Column(ResourceKey<Level> dimension, long position) {}
-    private record Candidate(Anchor anchor, ChunkPos position, long distance) {
+    private record Candidate(Anchor anchor, ChunkPos position, long distance, double priority) {
+        Candidate(Anchor anchor, ChunkPos position, long distance, GenerationChunkCursor.View view) {
+            this(anchor, position, distance, view.priority(anchor.center(), position, distance));
+        }
+
         Column column() {
             return new Column(this.anchor.level().dimension(), this.position.toLong());
         }
@@ -78,14 +88,15 @@ final class ServerLodGenerator {
         }
     }
 
-    private static final Comparator<Candidate> PRIORITY = Comparator.comparingLong(Candidate::distance)
+    private static final Comparator<Candidate> PRIORITY = Comparator.comparingDouble(Candidate::priority)
+            .thenComparingLong(Candidate::distance)
             .thenComparing(candidate -> candidate.anchor.level().dimension().location())
             .thenComparingInt(candidate -> candidate.position.x)
             .thenComparingInt(candidate -> candidate.position.z);
 
     private final ServerLodService service;
     private final Executor worker;
-    private final Map<Anchor, NearChunkCursor> cursors = new LinkedHashMap<>();
+    private final Map<Anchor, GenerationChunkCursor> cursors = new LinkedHashMap<>();
     private final Map<Column, Job> active = new LinkedHashMap<>();
     private final Map<Column, Integer> deferredBackfills = new LinkedHashMap<>();
     private final Map<Column, Retry> retries = new HashMap<>();
@@ -140,7 +151,7 @@ final class ServerLodGenerator {
         if (!this.cursors.keySet().equals(anchors)) {
             this.cursors.keySet().retainAll(anchors);
             for (var anchor : anchors) {
-                this.cursors.computeIfAbsent(anchor, value -> new NearChunkCursor(value.center(), value.radius()));
+                this.cursors.computeIfAbsent(anchor, value -> new GenerationChunkCursor(value.center(), value.radius()));
             }
             this.deferredBackfills.keySet().removeIf(key -> priorityAt(anchors, key) == null);
             this.examined.clear();
@@ -185,7 +196,7 @@ final class ServerLodGenerator {
     private void scheduleNext(Candidate candidate) {
         var retry = this.retries.remove(candidate.column());
         if (retry == null) {
-            this.cursors.get(candidate.anchor()).advance();
+            this.cursors.get(candidate.anchor()).advance(candidate.position());
             this.examined.add(candidate.column());
         }
         this.schedule(candidate, retry == null ? 0 : retry.attempts(), false);
@@ -247,7 +258,7 @@ final class ServerLodGenerator {
         Candidate best = null;
         for (var anchor : anchors) {
             if (!applies(anchor, column)) continue;
-            var candidate = new Candidate(anchor, position, anchor.distance(position));
+            var candidate = new Candidate(anchor, position, anchor.distance(position), anchor.view());
             if (best == null || PRIORITY.compare(candidate, best) < 0) best = candidate;
         }
         return best;
@@ -257,9 +268,10 @@ final class ServerLodGenerator {
         while (visits[0]-- > 0) {
             Candidate nearest = null;
             for (var entry : this.cursors.entrySet()) {
-                var candidate = entry.getValue().peek();
+                var view = entry.getKey().view();
+                var candidate = entry.getValue().peek(view);
                 if (candidate == null) continue;
-                var current = new Candidate(entry.getKey(), candidate.position(), candidate.distanceSquared());
+                var current = new Candidate(entry.getKey(), candidate.position(), candidate.distanceSquared(), view);
                 if (nearest == null || PRIORITY.compare(current, nearest) < 0) nearest = current;
             }
             if (nearest == null) return null;
@@ -269,7 +281,7 @@ final class ServerLodGenerator {
                     && nearest.anchor.level().getWorldBorder().isWithinBounds(nearest.position())) {
                 return nearest;
             }
-            this.cursors.get(nearest.anchor()).advance();
+            this.cursors.get(nearest.anchor()).advance(nearest.position());
         }
         return null;
     }
@@ -283,7 +295,7 @@ final class ServerLodGenerator {
                 if (!anchor.level().dimension().equals(entry.getKey().dimension())) continue;
                 long distance = anchor.distance(pos);
                 if (distance == Long.MAX_VALUE || !anchor.level().getWorldBorder().isWithinBounds(pos)) continue;
-                var candidate = new Candidate(anchor, pos, distance);
+                var candidate = new Candidate(anchor, pos, distance, anchor.view());
                 if (nearest == null || PRIORITY.compare(candidate, nearest) < 0) nearest = candidate;
             }
         }
@@ -397,21 +409,21 @@ final class ServerLodGenerator {
                 var level = player.serverLevel();
                 if (this.unloaded.contains(level)) continue;
                 occupied.add(level.dimension());
-                anchors.add(new Anchor(level, player.chunkPosition(), radius));
+                anchors.add(new Anchor(level, player.chunkPosition(), radius, player, false));
             }
             for (String configured : config.get(ServerVoxyConfig.SPAWN_DIMENSIONS)) {
                 var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(configured));
-                if (occupied.contains(key)) anchors.add(spawnAnchor(server.getLevel(key), radius, config));
+                if (occupied.contains(key)) anchors.add(spawnAnchor(server.getLevel(key), radius, config, true));
             }
         } else {
             for (String configured : config.get(ServerVoxyConfig.SPAWN_DIMENSIONS)) {
                 var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(configured));
                 var level = server.getLevel(key);
                 if (level == null || this.unloaded.contains(level)) continue;
-                var anchor = spawnAnchor(level, radius, config);
+                var anchor = spawnAnchor(level, radius, config, false);
                 if (this.finishedOffline.contains(anchor)) continue;
                 var cursor = this.cursors.get(anchor);
-                if (cursor != null && cursor.peek() == null && !this.isUnfinished(anchor)) {
+                if (cursor != null && cursor.peek(anchor.view()) == null && !this.isUnfinished(anchor)) {
                     this.finishedOffline.add(anchor);
                     String finished = this.generationOn ? "finished idle spawn coverage" : "finished idle saved-column scan";
                     Logger.info("Voxy " + finished + " in " + key.location() + " at radius " + radius);
@@ -436,7 +448,7 @@ final class ServerLodGenerator {
                 && anchor.level().getWorldBorder().isWithinBounds(position);
     }
 
-    private static Anchor spawnAnchor(ServerLevel level, int radius, ServerVoxyConfig config) {
+    private static Anchor spawnAnchor(ServerLevel level, int radius, ServerVoxyConfig config, boolean online) {
         var id = level.dimension().location();
         BlockPos spawn = BlockPos.ZERO;
         if (level == level.getServer().overworld()) {
@@ -452,7 +464,7 @@ final class ServerLodGenerator {
                 break;
             }
         }
-        return new Anchor(level, new ChunkPos(spawn), radius);
+        return new Anchor(level, new ChunkPos(spawn), radius, null, online);
     }
 
     Report report() {

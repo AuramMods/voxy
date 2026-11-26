@@ -1,4 +1,8 @@
 {
+  "key.categories.voxy": "Voxy",
+  "key.voxy.show_lod_levels": "Show LOD levels (hold)",
+  "voxy.debug.chunk_workers": "Minecraft chunk workers:",
+  "voxy.debug.chunk_worker_usage": "%s%% (%s of %s)",
   "voxy.config.general": "General",
   "voxy.config.rendering": "Rendering",
   "voxy.config.server": "Voxy Server",

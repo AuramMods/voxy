@@ -39,6 +39,7 @@
     "minecraft.MixinClientLevel",
     "minecraft.MixinClientPacketListener",
     "minecraft.MixinDebugScreenOverlay",
+    "minecraft.MixinDebugChunkWorkers",
     "minecraft.MixinFogRenderer",
     "minecraft.MixinGameRenderer",
     // "minecraft.MixinGlDebug",

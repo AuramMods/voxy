@@ -21,11 +21,13 @@ Copy that template to `<world>/serverconfig/voxy-server.toml` for an existing de
 | `spawnDimensions` | `['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end']` | Ordered list of dimensions with spawn anchors. IDs for missing dimensions can stay in the list. |
 | `spawnAnchors` | `[]` | Optional overrides in `dimension=x,z` form using block coordinates. The Overworld uses its saved spawn and other dimensions default to X/Z `0,0`. |
 
-With players online, the generator considers only dimensions with at least one player. Within an occupied dimension, every player is an anchor. A listed dimension also contributes its spawn anchor. The closest eligible missing chunk across those anchors wins the next ticket, with deterministic ties.
+With players online, the generator considers only occupied dimensions. Distance bands are two chunks wide. Within the same band, the generator favors terrain in the player's horizontal look direction. Turning changes the priority of pending work. An occupied dimension can also contribute a configured spawn anchor, with a 16-chunk scheduling penalty so nearby player coverage comes first.
 
 When nobody is online, Voxy fills the spawn radius of the first available dimension with unfinished coverage. It completes that dimension before issuing a ticket for the next one. The console reports chunks per second every 60 seconds, including newly generated and reused chunks, dimensions that were generating, and active ticket count. Start a disposable server with `-Dvoxy.traceServerLodJobs=true` to log individual ticket acquisitions and releases.
 
 The server switches job limits as players join or leave. Previously started work can finish when the limit drops. With generation enabled, Voxy can backfill up to two saved columns concurrently while it searches for and generates missing terrain. The generation job limit controls Voxy's outstanding work. Minecraft manages the actual world-generation threads and can load dependency chunks for each Voxy ticket.
+
+In singleplayer, the top-right F3 panel shows the share of Minecraft's background worker capacity executing chunk generation, lighting, or load preparation. The count reflects the local server's Minecraft pool.
 
 ## Persistence and reconnects
 

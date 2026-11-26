@@ -127,13 +127,14 @@ uvec3 makeRemainingAttributes(const in BlockModel model, const in Quad quad, uin
 
     attributes.x = packVec4(tinting);
     attributes.y = conditionalTinting;
-    attributes.z = addin|(face<<8);
+    attributes.z = addin;
     #endif
 
-    attributes.z |= modelUsesFluidDatum(model) ? (1u << 11u) : 0u;
-    attributes.z |= modelIsLeaf(model) ? (1u << 12u) : 0u;
+    attributes.z |= lodLevel << 8u;
+    attributes.z |= modelUsesFluidDatum(model) ? (1u << 12u) : 0u;
+    attributes.z |= modelIsLeaf(model) ? (1u << 13u) : 0u;
     attributes.z |= (modelUsesFluidDatum(model) || modelIsLava(model))
-            ? (1u << 13u) : 0u;
+            ? (1u << 14u) : 0u;
 
     return attributes;
 }
@@ -217,7 +218,7 @@ void setupQuad(out QuadData quad, const in Quad rawQuad, uvec2 sPos, bool genera
     if (generateAttributes) {
         quad.attributeData.x = makeQuadFlags(faceData, modelId, quadSize, model, face);
         quad.attributeData.yzw = makeRemainingAttributes(model, rawQuad, lodLevel, face);
-        quad.attributeData.w |= ((model.flagsA >> 13u) & 1u) << 14u;
+        quad.attributeData.w |= ((model.flagsA >> 13u) & 1u) << 15u;
         if (modelUsesBalancedLeafCutout(model)) {
             quad.attributeData.w |= makeBalancedLeafSeed(rawQuad, lodPos, lodLevel, face) << 16u;
         }

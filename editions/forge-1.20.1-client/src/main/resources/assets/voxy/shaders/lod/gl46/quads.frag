@@ -82,7 +82,7 @@ uint tintingState() {
 }
 
 bool modelIsLeaf() {
-    return ((interData.w >> 12u) & 1u) != 0u;
+    return ((interData.w >> 13u) & 1u) != 0u;
 }
 
 bool useDiscard() {
@@ -94,16 +94,31 @@ bool useBalancedLeafCutout() {
 }
 
 bool useIndependentWaterBoundary() {
-    return ((interData.w >> 11u) & 1u) == 1u;
+    return ((interData.w >> 12u) & 1u) == 1u;
 }
 
 bool useOriginalLeafHandoff() {
-    return useBalancedLeafCutout() || ((interData.w >> 12u) & 1u) == 1u;
+    return useBalancedLeafCutout() || modelIsLeaf();
 }
 
 bool useCoarseFluidProxy() {
-    return ((interData.w >> 13u) & 1u) == 1u;
+    return ((interData.w >> 14u) & 1u) == 1u;
 }
+
+#ifndef VOXY_SHADOW_PASS
+#define VOXY_LOD_DEBUG_TINT
+vec3 voxy_applyLodDebugTint(vec3 colour) {
+    if (lodDebugTint == 0u) return colour;
+    const vec3 palette[16] = vec3[16](
+        vec3(0.05, 0.32, 1.0), vec3(0.06, 0.95, 0.22), vec3(1.0, 0.94, 0.06),
+        vec3(1.0, 0.45, 0.04), vec3(1.0, 0.08, 0.08), vec3(0.60, 0.18, 1.0),
+        vec3(0.04, 0.95, 0.95), vec3(1.0, 0.20, 0.65), vec3(0.68, 1.0, 0.15),
+        vec3(0.08, 0.64, 0.60), vec3(0.98, 0.68, 0.45), vec3(0.37, 0.44, 0.89),
+        vec3(0.67, 0.47, 0.20), vec3(0.92, 0.60, 0.93), vec3(0.59, 0.82, 0.98),
+        vec3(0.90, 0.90, 0.90));
+    return mix(colour, palette[(interData.w >> 8u) & 15u], 0.33);
+}
+#endif
 
 vec2 varyBalancedLeafUV(vec2 localUV, vec2 tile, out uint leafHash) {
     uvec2 tilePos = uvec2(max(tile, vec2(0.0f)));
@@ -183,6 +198,9 @@ vec4 computeColour(vec2 texturePos, vec4 colour) {
     if (doTint) {
         colour *= uint2vec4RGBA(interData.z).yzwx;
     }
+    #ifndef VOXY_SHADOW_PASS
+    colour.rgb = voxy_applyLodDebugTint(colour.rgb);
+    #endif
     return (colour * uint2vec4RGBA(interData.y)) + vec4(0,0,0,float(interData.w&0xFFu)/255);
 }
 
@@ -238,7 +256,7 @@ bool submittedNearInterior(float readiness) {
 }
 
 bool hasDedicatedTrack() {
-    if (trackReplacement.x < 0.5 || ((interData.w >> 14u) & 1u) == 0u) return false;
+    if (trackReplacement.x < 0.5 || ((interData.w >> 15u) & 1u) == 0u) return false;
     ivec3 block = fragmentBlock();
     vec3 origin = vec3((block >> 4) * 16 - baseSectionPos * 32) - cameraSubPos;
     float distanceSq = dot(origin, origin);
@@ -403,6 +421,12 @@ void main() {
     if (doTint) {
         tint = uint2vec4RGBA(interData.z).yzwx;
     }
+    #ifndef VOXY_PACK_APPLIES_LOD_DEBUG_TINT
+    if (lodDebugTint != 0u) {
+        colour.rgb = voxy_applyLodDebugTint(colour.rgb * tint.rgb);
+        tint.rgb = vec3(1.0);
+    }
+    #endif
 
     uint face = getFace();
     face ^= uint((face&1u)!=uint(gl_FrontFacing!=((face>>1)!=0u)));
