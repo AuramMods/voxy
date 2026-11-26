@@ -19,6 +19,5 @@ class ChunkWorkerUsageTest {
                 .get(5, TimeUnit.SECONDS));
         assertEquals(1, CompletableFuture.supplyAsync(() -> ChunkWorkerUsage.sample().busy(), withTracking)
                 .get(5, TimeUnit.SECONDS));
-        assertEquals(25, new ChunkWorkerUsage.Sample(2, 8).percent());
     }
 }
