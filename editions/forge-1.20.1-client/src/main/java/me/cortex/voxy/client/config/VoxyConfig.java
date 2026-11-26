@@ -33,6 +33,7 @@ public class VoxyConfig
     public static final float MIN_SUBDIVISION_SIZE = 28.0f;
     public static final float MAX_SUBDIVISION_SIZE = 1024.0f;
     public static final int DEFAULT_RENDER_QUALITY_LEVEL = 3;
+    public static final int MAX_SHADER_SHADOW_DISTANCE = 1024;
     private static final float[] RENDER_QUALITY_SIZES = {1024, 768, 512, 256, 123, 64, 28};
     private static final Gson GSON = new GsonBuilder()
             .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
@@ -46,6 +47,7 @@ public class VoxyConfig
     public boolean enableRendering = true;
     public boolean ingestEnabled = true;
     public float sectionRenderDistance = 8;
+    public int shaderShadowDistance = 0;
     public int serviceThreads = (int) Math.max(CpuLayout.getCoreCount()/1.5, 1);
     public float subDivisionSize = RENDER_QUALITY_SIZES[DEFAULT_RENDER_QUALITY_LEVEL];
     public int skyFogDistance = 96;
@@ -183,6 +185,7 @@ public class VoxyConfig
 
     public void sanitize() {
         this.sectionRenderDistance = clamp(this.sectionRenderDistance, 0.625f, 64.0f);
+        this.shaderShadowDistance = clamp(this.shaderShadowDistance, 0, MAX_SHADER_SHADOW_DISTANCE);
         this.subDivisionSize = clamp(this.subDivisionSize, MIN_SUBDIVISION_SIZE, MAX_SUBDIVISION_SIZE);
         this.skyFogDistance = clamp(this.skyFogDistance, 0, 1024);
         this.fogIntensity = clamp(this.fogIntensity, 0.0f, 1.0f);

@@ -15,6 +15,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.function.Function;
@@ -23,6 +24,17 @@ import java.util.function.Function;
 public class MixinProgramSet implements IGetVoxyPatchData {
     @Shadow @Final private PackDirectives packDirectives;
     @Unique IrisShaderPatch patchData;
+
+    @ModifyVariable(method = "<init>", at = @At("HEAD"), argsOnly = true)
+    private static Function<AbsolutePackPath, String> voxy$overrideShadowDistance(Function<AbsolutePackPath, String> sourceProvider) {
+        var config = VoxyConfig.CONFIG;
+        int distance = config.shaderShadowDistance;
+        if (distance == 0 || !IrisUtil.SHADER_SUPPORT || !config.isRenderingEnabled()) {
+            return sourceProvider;
+        }
+        // Oculus reads the projection directive from the same source it compiles.
+        return path -> IrisUtil.overrideShadowDistance(sourceProvider.apply(path), distance);
+    }
 
     @Inject(method = "<init>", at = @At("RETURN"))
     private void voxy$injectPatchMaker(AbsolutePackPath directory, Function<AbsolutePackPath, String> sourceProvider, ShaderProperties shaderProperties, ShaderPack pack, CallbackInfo ci) {

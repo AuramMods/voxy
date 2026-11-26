@@ -5,6 +5,7 @@ import me.cortex.voxy.client.ClientSessionEvents;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.client.core.SSAO;
 import me.cortex.voxy.client.core.util.IrisUtil;
+import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.jellysquid.mods.sodium.client.gui.options.OptionFlag;
 import me.jellysquid.mods.sodium.client.gui.options.OptionGroup;
@@ -176,6 +177,24 @@ public abstract class VoxyConfigScreenPages {
                         }, s -> Math.min(MAX_RENDER_DISTANCE, Math.round(s.sectionRenderDistance * 16)))
                         .setImpact(OptionImpact.LOW)
                         .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                        .build())
+                .add(OptionImpl.createBuilder(int.class, storage)
+                        .setName(Component.translatable("voxy.config.rendering.shaderShadowDistance"))
+                        .setTooltip(Component.translatable("voxy.config.rendering.shaderShadowDistance.tooltip"))
+                        .setEnabledPredicate(() -> IrisUtil.IRIS_INSTALLED)
+                        .setControl(option -> new SliderControl(option, 0, VoxyConfig.MAX_SHADER_SHADOW_DISTANCE, 32,
+                                value -> value == 0
+                                        ? Component.translatable("voxy.config.rendering.shaderShadowDistance.pack")
+                                        : Component.translatable("voxy.config.rendering.shaderShadowDistance.blocks", value)))
+                        .setBinding((s, value) -> {
+                            s.shaderShadowDistance = value;
+                            try {
+                                IrisUtil.reload();
+                            } catch (RuntimeException e) {
+                                Logger.warn("Could not reload shaders after changing the shadow distance", e);
+                            }
+                        }, s -> s.shaderShadowDistance)
+                        .setImpact(OptionImpact.VARIES)
                         .build())
                 .add(OptionImpl.createBuilder(int.class, storage)
                         .setName(Component.translatable("voxy.config.general.renderPressure"))

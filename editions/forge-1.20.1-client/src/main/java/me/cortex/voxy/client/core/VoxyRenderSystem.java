@@ -284,7 +284,7 @@ public class VoxyRenderSystem {
     }
 
     public void renderShadowCasters(Matrix4fc projection, Matrix4fc modelView, double cameraX, double cameraY,
-                                    double cameraZ, int depthTexture, int resolution) {
+                                    double cameraZ, float shadowDistance, int depthTexture, int resolution) {
         if (this.shadowTerrainCoverage == null) return;
         if (visionEffectPresent()) return;
         if (!(this.pipeline.sectionRenderer instanceof MDICSectionRenderer renderer)) return;
@@ -294,7 +294,8 @@ public class VoxyRenderSystem {
             var viewport = this.shadowViewport;
             // Bliss's nonlinear warp admits casters beyond the undistorted XY frustum.
             // The separate Z scale matches the shadow map's clip-space depth compression.
-            viewport.shadowCasterRange = 768.0f;
+            // Include distant casters that can project into the visible shadow range.
+            viewport.shadowCasterRange = Math.max(768.0f, shadowDistance * 2.0f);
             viewport.setVanillaProjection(projection).setModelView(modelView)
                     .setCamera(cameraX, cameraY, cameraZ).setScreenSize(resolution, resolution);
             viewport.projection.set(projection).scaleLocal(0.25f, 0.25f, 1.0f / 6.0f);

@@ -1,6 +1,10 @@
 {
   "voxy.config.general": "常规",
   "voxy.config.rendering": "渲染",
+  "voxy.config.rendering.shaderShadowDistance": "光影阴影距离",
+  "voxy.config.rendering.shaderShadowDistance.tooltip": "设置兼容光影包（包括 AuramBliss）的地形太阳阴影距离。距离越远，阴影覆盖的远景越多，但近处阴影可能变模糊。应用此设置将重新加载光影。",
+  "voxy.config.rendering.shaderShadowDistance.pack": "由光影包决定",
+  "voxy.config.rendering.shaderShadowDistance.blocks": "%s 方块",
   "voxy.config.server": "Voxy 服务器",
   "voxy.config.server.generation": "远景生成",
   "voxy.config.server.generation.tooltip": "生成缺失的地形。关闭后仍可将已保存的区块转换为远景。应用设置会更新打开的单人世界，并保存 defaultconfigs/voxy-server.toml。",

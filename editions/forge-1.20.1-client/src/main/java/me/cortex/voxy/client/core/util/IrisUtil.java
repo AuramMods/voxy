@@ -10,8 +10,19 @@ import net.irisshaders.iris.gl.IrisRenderSystem;
 import net.irisshaders.iris.shadows.ShadowRenderer;
 
 import java.io.IOException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class IrisUtil {
+    private static final Pattern SHADOW_DISTANCE = Pattern.compile(
+            "(?m)^(\\h*const\\h+float\\h+shadowDistance\\h*=\\h*)[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?[fF]?(\\h*;)");
+
+    public static String overrideShadowDistance(String source, int distance) {
+        if (source == null || !source.contains("shadowDistance")) return source;
+        return SHADOW_DISTANCE.matcher(source).replaceAll(match ->
+                Matcher.quoteReplacement(match.group(1) + distance + ".0" + match.group(2)));
+    }
+
     public record CapturedViewportParameters(ChunkRenderMatrices matrices, double x, double y, double z) {
         public Viewport<?> apply(VoxyRenderSystem vrs) {
             return vrs.setupViewport(this.matrices.projection(), this.matrices.modelView(), this.x, this.y, this.z);

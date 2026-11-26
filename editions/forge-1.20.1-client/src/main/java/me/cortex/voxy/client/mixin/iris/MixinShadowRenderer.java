@@ -18,6 +18,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = ShadowRenderer.class, remap = false)
 public class MixinShadowRenderer {
     @Shadow @Final private ShadowRenderTargets targets;
+    @Shadow @Final private float halfPlaneLength;
 
     @Unique
     private static VoxyRenderSystem voxy$renderer() {
@@ -39,6 +40,6 @@ public class MixinShadowRenderer {
         if (renderer == null) return;
         var position = camera.getPosition();
         renderer.renderShadowCasters(ShadowRenderer.PROJECTION, ShadowRenderer.MODELVIEW, position.x, position.y,
-                position.z, this.targets.getDepthTexture().getTextureId(), this.targets.getResolution());
+                position.z, this.halfPlaneLength, this.targets.getDepthTexture().getTextureId(), this.targets.getResolution());
     }
 }
