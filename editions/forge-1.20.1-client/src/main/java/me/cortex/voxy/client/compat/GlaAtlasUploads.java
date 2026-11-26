@@ -102,9 +102,12 @@ public final class GlaAtlasUploads {
             BATCH.flush();
             return false;
         }
-        if (!closesImage && pixels != 0 && width <= UploadBatch.SIZE && height <= UploadBatch.SIZE
+        FrameKey key = frameSprite == null ? null : new FrameKey(frameSprite, frameIndex, level, width, height);
+        Integer cached = key == null ? null : FRAME_TEXTURES.get(key);
+        // Cache hits can blit immediately. Group only uploads that need CPU pixel transfers.
+        if (cached == null && !closesImage && pixels != 0 && width <= UploadBatch.SIZE && height <= UploadBatch.SIZE
                 && glGetInteger(GL_PIXEL_UNPACK_BUFFER_BINDING) == 0) {
-            BATCH.add(level, x, y, width, height, pixels, imageWidth, skipX, skipY);
+            BATCH.add(level, x, y, width, height, pixels, imageWidth, skipX, skipY, key);
             return true;
         }
 
@@ -120,9 +123,6 @@ public final class GlaAtlasUploads {
             if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
                 return false;
             }
-            // Keep recurring source frames immutable on the GPU. NativeImage has already set the unpack layout.
-            FrameKey key = frameSprite == null ? null : new FrameKey(frameSprite, frameIndex, level, width, height);
-            Integer cached = key == null ? null : FRAME_TEXTURES.get(key);
             int source;
             long bytes = (long) width * height * 4;
             if (cached != null) {
@@ -228,8 +228,8 @@ public final class GlaAtlasUploads {
         private int attachedRead, attachedDraw, attachedLevel;
         private boolean readComplete, drawComplete;
 
-        private record Copy(int level, int x, int y, int width, int height, FrameKey key, int cachedTexture,
-                            int stagingX, int stagingY, long sourcePixels, int imageWidth, int skipX, int skipY) {}
+        private record Copy(int level, int x, int y, int width, int height, FrameKey key,
+                            int stagingX, int stagingY) {}
 
         private static final class StagingPage {
             int texture;
@@ -251,14 +251,9 @@ public final class GlaAtlasUploads {
             }
         }
 
-        void add(int level, int x, int y, int width, int height, long source, int stride, int skipX, int skipY) {
+        void add(int level, int x, int y, int width, int height, long source, int stride, int skipX, int skipY,
+                 FrameKey key) {
             if (this.copies.size() == MAX_COPIES) this.flush();
-            FrameKey key = frameSprite == null ? null : new FrameKey(frameSprite, frameIndex, level, width, height);
-            Integer hit = key == null ? null : FRAME_TEXTURES.get(key);
-            if (hit != null) {
-                this.copies.add(new Copy(level, x, y, width, height, key, hit, 0, 0, source, stride, skipX, skipY));
-                return;
-            }
 
             if (this.nextX + width > SIZE) {
                 this.nextX = 0;
@@ -272,7 +267,7 @@ public final class GlaAtlasUploads {
             for (int row = 0; row < height; row++) {
                 MemoryUtil.memCopy(read + row * stride * 4L, write + row * STRIDE, width * 4L);
             }
-            this.copies.add(new Copy(level, x, y, width, height, key, 0, this.nextX, this.nextY, 0, 0, 0, 0));
+            this.copies.add(new Copy(level, x, y, width, height, key, this.nextX, this.nextY));
             this.nextX += width;
             this.rowHeight = Math.max(this.rowHeight, height);
             this.usedWidth = Math.max(this.usedWidth, this.nextX);
@@ -334,37 +329,28 @@ public final class GlaAtlasUploads {
         }
 
         private void copyToAtlas(Copy copy, StagingPage page) {
-            int texture = copy.cachedTexture();
+            int texture;
             int sx = 0, sy = 0;
-            if (texture == 0) {
-                if (page != null) {
-                    texture = page.texture;
-                    sx = copy.stagingX();
-                    sy = copy.stagingY();
-                } else {
-                    setUnpack(SIZE, 0, 0, 4);
-                    uploadTransient(copy.width(), copy.height(), this.stagedPixels(copy));
-                    texture = stagingTexture;
-                }
+            if (page != null) {
+                texture = page.texture;
+                sx = copy.stagingX();
+                sy = copy.stagingY();
+            } else {
+                setUnpack(SIZE, 0, 0, 4);
+                uploadTransient(copy.width(), copy.height(), this.stagedPixels(copy));
+                texture = stagingTexture;
             }
 
             if (!this.blit(texture, sx, sy, animationAtlas, copy.level(), copy.x(), copy.y(), copy.width(), copy.height())) {
                 glBindTexture(GL_TEXTURE_2D, animationAtlas);
-                long source;
-                if (copy.cachedTexture() == 0) {
-                    setUnpack(SIZE, 0, 0, 4);
-                    source = this.stagedPixels(copy);
-                } else {
-                    setUnpack(copy.imageWidth(), copy.skipX(), copy.skipY(), 4);
-                    source = copy.sourcePixels();
-                }
+                setUnpack(SIZE, 0, 0, 4);
                 GlStateManager._texSubImage2D(GL_TEXTURE_2D, copy.level(), copy.x(), copy.y(), copy.width(), copy.height(),
-                        GL_RGBA, GL_UNSIGNED_BYTE, source);
+                        GL_RGBA, GL_UNSIGNED_BYTE, this.stagedPixels(copy));
                 return;
             }
 
             long bytes = (long) copy.width() * copy.height() * 4;
-            if (copy.cachedTexture() == 0 && copy.key() != null && !FRAME_TEXTURES.containsKey(copy.key())
+            if (copy.key() != null && !FRAME_TEXTURES.containsKey(copy.key())
                     && FRAME_TEXTURES.size() < MAX_FRAME_TEXTURES && frameBytes + bytes <= MAX_FRAME_BYTES) {
                 int cached = glGenTextures();
                 glBindTexture(GL_TEXTURE_2D, cached);
