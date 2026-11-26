@@ -251,6 +251,19 @@ public class HierarchicalOcclusionTraverser {
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, RENDER_QUEUE_BINDING, viewport.getRenderList().id);
     }
 
+    private static final long REFINEMENT_VIEW_INTERVAL_NANOS = 100_000_000L;
+    private long lastRefinementView;
+    private boolean lastZooming;
+
+    public void updateRefinementView(Viewport<?> viewport, boolean zooming) {
+        long now = System.nanoTime();
+        if (this.lastRefinementView != 0 && zooming == this.lastZooming
+                && now - this.lastRefinementView < REFINEMENT_VIEW_INTERVAL_NANOS) return;
+        this.lastRefinementView = now;
+        this.lastZooming = zooming;
+        this.nodeManager.updateRefinementView(RefinementView.capture(viewport, VoxyConfig.CONFIG.subDivisionSize));
+    }
+
     public void doTraversal(Viewport<?> viewport) {
         this.uploadUniform(viewport);
         //UploadStream.INSTANCE.commit(); //Done inside traversal
@@ -273,7 +286,7 @@ public class HierarchicalOcclusionTraverser {
         //Traverse
         this.traverseInternal();
 
-        this.downloadResetRequestQueue();
+        this.downloadResetRequestQueue(viewport.isShadowPass());
 
         if (RenderStatistics.enabled) {
             DownloadStream.INSTANCE.download(this.statisticsBuffer, down->{
@@ -358,13 +371,13 @@ public class HierarchicalOcclusionTraverser {
     }
 
 
-    private void downloadResetRequestQueue() {
+    private void downloadResetRequestQueue(boolean shadowPass) {
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-        DownloadStream.INSTANCE.download(this.requestBuffer, this::forwardDownloadResult);
+        DownloadStream.INSTANCE.download(this.requestBuffer, (ptr, size) -> this.forwardDownloadResult(ptr, shadowPass));
         nglClearNamedBufferSubData(this.requestBuffer.id, GL_R32UI, 0, 4, GL_RED_INTEGER, GL_UNSIGNED_INT, 0);
     }
 
-    private void forwardDownloadResult(long ptr, long size) {
+    private void forwardDownloadResult(long ptr, boolean shadowPass) {
         int count = MemoryUtil.memGetInt(ptr);ptr += 8;//its 8 since we need to skip the second value (which is empty)
         if (count < 0 || count > 50000) {
             Logger.error(new IllegalStateException("Count unexpected extreme value: " + count + " things may get weird"));
@@ -386,7 +399,7 @@ public class HierarchicalOcclusionTraverser {
             var requests = new MemoryBuffer(count * 8L + 8).cpyFrom(ptr - 8);
             // 回读映射只读，仅在拥有的副本中更新截断后的数量。
             MemoryUtil.memPutInt(requests.address, count);
-            this.nodeManager.submitRequestBatch(requests);
+            this.nodeManager.submitRequestBatch(requests, shadowPass);
         }
     }
 

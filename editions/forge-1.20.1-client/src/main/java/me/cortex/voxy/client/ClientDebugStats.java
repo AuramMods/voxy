@@ -23,7 +23,7 @@ public final class ClientDebugStats {
     private record Observation(long time, int busyWorkers, long busyWorkerNanos, long meshes, long receivedSections) {}
 
     public record Snapshot(double busyWorkers, int totalWorkers, int queuedMeshJobs, double meshesPerSecond,
-                           double receivedSectionsPerSecond, boolean localTerrain, boolean remoteStream) {}
+                           double receivedSectionsPerSecond, boolean meshPacingBypassed, boolean localTerrain, boolean remoteStream) {}
 
     private ClientDebugStats() {}
 
@@ -76,6 +76,6 @@ public final class ClientDebugStats {
         boolean localTerrain = renderer != null && ClientLodStream.isReadingLocalTerrain();
         latest = new Snapshot(averageBusyWorkers, totalWorkers, renderer == null ? -1 : renderer.getQueuedMeshJobs(),
                 (meshes - first.meshes()) * rate, (receivedSections - first.receivedSections()) * rate,
-                localTerrain, renderer != null && !localTerrain && ClientLodStream.hasScope());
+                renderer != null && renderer.isMeshPacingBypassed(), localTerrain, renderer != null && !localTerrain && ClientLodStream.hasScope());
     }
 }

@@ -215,6 +215,16 @@ public abstract class VoxyConfigScreenPages {
                         .setImpact(OptionImpact.HIGH)
                         .build())
                 .add(OptionImpl.createBuilder(int.class, storage)
+                        .setName(Component.translatable("voxy.config.rendering.meshWarmupSeconds"))
+                        .setTooltip(Component.translatable("voxy.config.rendering.meshWarmupSeconds.tooltip"))
+                        .setControl(option -> new SliderControl(option, 0, VoxyConfig.MAX_MESH_WARMUP_SECONDS, 1,
+                                value -> value == 0
+                                        ? Component.translatable("voxy.config.rendering.meshWarmupSeconds.off")
+                                        : Component.translatable("voxy.config.rendering.meshWarmupSeconds.duration", value)))
+                        .setBinding((s, value) -> s.meshWarmupSeconds = value, s -> s.meshWarmupSeconds)
+                        .setImpact(OptionImpact.HIGH)
+                        .build())
+                .add(OptionImpl.createBuilder(int.class, storage)
                         .setName(Component.translatable("voxy.config.general.leafLodMode"))
                         .setTooltip(Component.translatable("voxy.config.general.leafLodMode.tooltip"))
                         .setControl(option -> new SliderControl(option, 0, 2, 1,

@@ -32,6 +32,7 @@ import java.lang.invoke.VarHandle;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.StampedLock;
 
@@ -74,10 +75,13 @@ public class AsyncNodeManager {
     private final BasicAsyncGeometryManager geometryManager;
     private final IGeometryData geometryData;
     private final SectionUpdateRouter router;
+    private final RenderGenerationService renderService;
 
     private final GeometryCache geometryCache = new GeometryCache(1L<<32);
 
     private final AtomicInteger workCounter = new AtomicInteger();
+    private final AtomicReference<RefinementView> pendingRefinementView = new AtomicReference<>();
+    private RefinementView refinementView;
 
     @SuppressWarnings("FieldMayBeFinal")
     private volatile SyncResults results = null, resultCache1 = new SyncResults(), resultCache2 = new SyncResults();
@@ -90,7 +94,8 @@ public class AsyncNodeManager {
 
     private boolean needsWaitForSync = false;
 
-    public AsyncNodeManager(int maxNodeCount, IGeometryData geometryData, RenderGenerationService renderService) {
+    public AsyncNodeManager(int maxNodeCount, IGeometryData geometryData, RenderGenerationService renderService,
+                            SectionUpdateRouter router) {
         //Note the current implmentation of ISectionWatcher is threadsafe
         //Note: geometry data is the data store/source, not the management, it is just a raw store of data
         // it MUST ONLY be accessed on the render thread
@@ -121,7 +126,8 @@ public class AsyncNodeManager {
 
         this.geometryManager = new BasicAsyncGeometryManager(((BasicSectionGeometryData)geometryData).getMaxSectionCount(), this.geometryCapacity);
 
-        this.router = new SectionUpdateRouter();
+        this.renderService = renderService;
+        this.router = router;
         this.router.setCallbacks(pos->{//On initial render gen, try get from geometry cache
             var cachedGeometry = this.geometryCache.remove(pos);
             if (cachedGeometry != null) {//Use the cached geometry
@@ -196,10 +202,9 @@ public class AsyncNodeManager {
             .compile();
 
     private void run() {
-        if (this.workCounter.get() <= 0) {
-            //TODO: here, instead of parking, we can do more work on other sub-tasks such as filtering the mesh build queue
+        if (this.workCounter.get() <= 0 && this.pendingRefinementView.get() == null) {
             LockSupport.park();
-            if (this.workCounter.get() <= 0 || !this.running) {//No work
+            if (!this.running || (this.workCounter.get() <= 0 && this.pendingRefinementView.get() == null)) {
                 return;
             }
             //This is a funny thing, wait a bit, this allows for better batching, but this thread is independent of everything else so waiting a bit should be mostly ok
@@ -216,6 +221,7 @@ public class AsyncNodeManager {
 
 
         int workDone = 0;
+        boolean removedNodes = false;
 
         {
             LongOpenHashSet add = null;
@@ -237,6 +243,7 @@ public class AsyncNodeManager {
                 var iter = rem.longIterator();
                 while (iter.hasNext()) {
                     this.manager.removeTopLevelNode(iter.nextLong());
+                    removedNodes = true;
                     work++;
                 }
             }
@@ -261,6 +268,16 @@ public class AsyncNodeManager {
             job.release();
         } while (true);
 
+
+        var newView = this.pendingRefinementView.getAndSet(null);
+        if (newView != null) {
+            this.refinementView = newView;
+            removedNodes |= this.manager.pruneCameraRefinements(newView);
+        }
+        if (removedNodes) {
+            this.renderService.pruneUnwatchedTasks();
+            this.geometryAllocationStalled = false;
+        }
 
         //Limit uploading as well as by geometry capacity being available
         // must have 50 mb of free geometry space to upload
@@ -297,18 +314,18 @@ public class AsyncNodeManager {
             if (job == null)
                 break;
             workDone++;
-            long ptr = job.address;
+            long ptr = job.data().address;
             int count = MemoryUtil.memGetInt(ptr);
             ptr += 8;//Its 8 to keep alignment
-            if (job.size < count * 8L + 8) {
+            if (job.data().size < count * 8L + 8) {
                 throw new IllegalStateException();
             }
             for (int i = 0; i < count; i++) {
                 long pos = ((long) MemoryUtil.memGetInt(ptr)) << 32; ptr += 4;
                 pos |= Integer.toUnsignedLong(MemoryUtil.memGetInt(ptr)); ptr += 4;
-                this.manager.processRequest(pos);
+                this.manager.processRequest(pos, job.shadowPass() ? null : this.refinementView);
             }
-            job.free();
+            job.data().free();
         }
 
 
@@ -357,7 +374,7 @@ public class AsyncNodeManager {
             }
         }
 
-        if (workDone == 0) {
+        if (workDone == 0 && !removedNodes) {
             // 容量不足时等待新事件，移除批次和停机会唤醒，保留未完成任务计数。
             LockSupport.park();
             return;
@@ -662,7 +679,9 @@ public class AsyncNodeManager {
     //Incoming events
 
     //TODO: add atomic counters for each event type probably
-    private final ConcurrentLinkedDeque<MemoryBuffer> requestBatchQueue = new ConcurrentLinkedDeque<>();
+    private record RequestBatch(MemoryBuffer data, boolean shadowPass) {}
+
+    private final ConcurrentLinkedDeque<RequestBatch> requestBatchQueue = new ConcurrentLinkedDeque<>();
     private final ConcurrentLinkedDeque<WorldSection> childUpdateQueue = new ConcurrentLinkedDeque<>();
     private final ConcurrentLinkedDeque<BuiltSection> geometryUpdateQueue = new ConcurrentLinkedDeque<>();
 
@@ -683,9 +702,14 @@ public class AsyncNodeManager {
         LockSupport.unpark(this.thread);
     }
 
-    public void submitRequestBatch(MemoryBuffer batch) {//Only called from render thread
-        this.requestBatchQueue.add(batch);
+    public void submitRequestBatch(MemoryBuffer batch, boolean shadowPass) {
+        this.requestBatchQueue.add(new RequestBatch(batch, shadowPass));
         this.addWork();
+    }
+
+    void updateRefinementView(RefinementView view) {
+        this.pendingRefinementView.set(view);
+        LockSupport.unpark(this.thread);
     }
 
     private void submitChildChange(WorldSection section) {
@@ -772,7 +796,7 @@ public class AsyncNodeManager {
             // 先终止网格结果的生产，再清空队列，避免晚到的结果遗留。
             cleanup.run(stopProducers);
             for (var item = this.requestBatchQueue.poll(); item != null; item = this.requestBatchQueue.poll()) {
-                cleanup.run(item::free);
+                cleanup.run(item.data()::free);
             }
             for (var item = this.removeBatchQueue.poll(); item != null; item = this.removeBatchQueue.poll()) {
                 cleanup.run(item::free);

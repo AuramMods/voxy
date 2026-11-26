@@ -50,7 +50,7 @@ abstract class MixinDebugChunkWorkers {
         }
         if (sample.queuedMeshJobs() >= 0) {
             var lods = Component.translatable("voxy.debug.lod_work", sample.queuedMeshJobs(),
-                    voxy$oneDecimal(sample.meshesPerSecond()));
+                    voxy$oneDecimal(sample.meshesPerSecond()) + (sample.meshPacingBypassed() ? "!" : ""));
             if (sample.localTerrain()) {
                 lods.append(Component.translatable("voxy.debug.lod_local"));
             } else if (sample.remoteStream()) {

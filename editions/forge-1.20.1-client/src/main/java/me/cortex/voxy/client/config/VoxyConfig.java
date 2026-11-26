@@ -35,6 +35,7 @@ public class VoxyConfig
     public static final int DEFAULT_RENDER_QUALITY_LEVEL = 3;
     public static final int MAX_SHADER_SHADOW_DISTANCE = 1024;
     public static final int MAX_MESH_JOBS_PER_SECOND = 500;
+    public static final int MAX_MESH_WARMUP_SECONDS = 60;
     private static final float[] RENDER_QUALITY_SIZES = {1024, 768, 512, 256, 123, 64, 28};
     private static final Gson GSON = new GsonBuilder()
             .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
@@ -59,6 +60,7 @@ public class VoxyConfig
     public boolean dontUseSodiumBuilderThreads = false;
     public int renderPressure = 2;
     public int meshJobsPerSecond = 50;
+    public int meshWarmupSeconds = 10;
     public String leafLodMode = "balanced";
     public int earthCurveRatio = 0;
     public int fogDistancePercent = 100;
@@ -188,6 +190,7 @@ public class VoxyConfig
     public void sanitize() {
         this.sectionRenderDistance = clamp(this.sectionRenderDistance, 0.625f, 64.0f);
         this.meshJobsPerSecond = clamp(this.meshJobsPerSecond, 0, MAX_MESH_JOBS_PER_SECOND);
+        this.meshWarmupSeconds = clamp(this.meshWarmupSeconds, 0, MAX_MESH_WARMUP_SECONDS);
         this.shaderShadowDistance = clamp(this.shaderShadowDistance, 0, MAX_SHADER_SHADOW_DISTANCE);
         this.subDivisionSize = clamp(this.subDivisionSize, MIN_SUBDIVISION_SIZE, MAX_SUBDIVISION_SIZE);
         this.skyFogDistance = clamp(this.skyFogDistance, 0, 1024);

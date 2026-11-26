@@ -9,6 +9,8 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import me.cortex.voxy.client.TimingStatistics;
 import me.cortex.voxy.client.VoxyClient;
 import me.cortex.voxy.client.compat.DynamicFpsCompat;
+import me.cortex.voxy.client.compat.JustZoomCompat;
+import me.cortex.voxy.client.core.rendering.SectionUpdateRouter;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.client.core.gl.GlBuffer;
@@ -159,12 +161,14 @@ public class VoxyRenderSystem {
             var backendFactory = getRenderBackendFactory();
             {
                 this.modelService = new ModelBakerySubsystem(world.getMapper());
-                this.renderGen = new RenderGenerationService(world, this.modelService, sm, IUsesMeshlets.class.isAssignableFrom(backendFactory.clz()));
+                var sectionUpdates = new SectionUpdateRouter();
+                this.renderGen = new RenderGenerationService(world, this.modelService, sm,
+                        IUsesMeshlets.class.isAssignableFrom(backendFactory.clz()), sectionUpdates);
 
                 borrowedGeometry = RenderResourceReuse.getOrCreateGeometryBuffer();
                 this.geometryData = new BasicSectionGeometryData(1<<20, borrowedGeometry);
 
-                this.nodeManager = new AsyncNodeManager(1 << 21, this.geometryData, this.renderGen);
+                this.nodeManager = new AsyncNodeManager(1 << 21, this.geometryData, this.renderGen, sectionUpdates);
                 this.nodeCleaner = new NodeCleaner(this.nodeManager);
                 this.traversal = new HierarchicalOcclusionTraverser(this.nodeManager, this.nodeCleaner, this.renderGen);
 
@@ -332,6 +336,9 @@ public class VoxyRenderSystem {
         if (viewport.width <= 0 || viewport.height <= 0) {
             return;//Only render on valid viewport
         }
+        boolean zooming = JustZoomCompat.isZooming();
+        this.renderGen.setZooming(zooming);
+        this.traversal.updateRefinementView(viewport, zooming);
         me.cortex.voxy.client.network.ClientLodStream.prioritize(viewport);
 
         TimingStatistics.resetSamplers();
@@ -570,8 +577,13 @@ public class VoxyRenderSystem {
 
     public void updateMeshJobLimit() {
         var client = Minecraft.getInstance();
-        this.renderGen.updateMeshJobLimit(VoxyConfig.CONFIG.meshJobsPerSecond,
+        this.renderGen.setZooming(JustZoomCompat.isZooming());
+        this.renderGen.updateMeshJobLimit(VoxyConfig.CONFIG.meshJobsPerSecond, VoxyConfig.CONFIG.meshWarmupSeconds,
                 DynamicFpsCompat.isIdleLimited(client.options.framerateLimit().get()));
+    }
+
+    public boolean isMeshPacingBypassed() {
+        return this.renderGen.isMeshPacingBypassed();
     }
 
     public void restartMeshBuildGracePeriod() {
