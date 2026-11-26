@@ -7,7 +7,6 @@ import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import org.sqlite.SQLiteConfig;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -15,6 +14,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.LongBuffer;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -414,8 +414,9 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
     }
 
     private static LodSectionSnapshot decode(long key, byte[] data, long[] destination) throws IOException {
-        try (var input = new DataInputStream(new BufferedInputStream(
-                new InflaterInputStream(new ByteArrayInputStream(data)), SECTION_IO_BUFFER_SIZE))) {
+        try (var input = new DataInputStream(new InflaterInputStream(new ByteArrayInputStream(data)))) {
+            byte[] encoded = new byte[SECTION_IO_BUFFER_SIZE];
+            LongBuffer wordsView = ByteBuffer.wrap(encoded).asLongBuffer();
             int level = WorldEngine.getLevel(key);
             byte children = input.readByte();
             SurfaceDataCoverage coverage = switch (input.readUnsignedByte()) {
@@ -423,15 +424,25 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
                 case 1 -> SurfaceDataCoverage.raw(level);
                 case 2 -> {
                     long[] words = new long[((1 << (3 * (level + 1))) + 63) / 64];
-                    for (int i = 0; i < words.length; i++) words[i] = input.readLong();
+                    readLongs(input, encoded, wordsView, words);
                     yield SurfaceDataCoverage.fromWords(level, words);
                 }
                 default -> throw new IOException("Unknown server section coverage mode");
             };
             long[] voxels = destination == null ? new long[WorldSection.SECTION_VOLUME] : destination;
-            for (int i = 0; i < voxels.length; i++) voxels[i] = input.readLong();
+            readLongs(input, encoded, wordsView, voxels);
             if (input.read() != -1) throw new IOException("Unexpected data after stored Voxy section");
             return new LodSectionSnapshot(key, children, coverage, voxels);
+        }
+    }
+
+    private static void readLongs(DataInputStream input, byte[] encoded, LongBuffer wordsView, long[] target)
+            throws IOException {
+        for (int offset = 0; offset < target.length; ) {
+            int count = Math.min(wordsView.capacity(), target.length - offset);
+            input.readFully(encoded, 0, count * Long.BYTES);
+            wordsView.get(0, target, offset, count);
+            offset += count;
         }
     }
 
