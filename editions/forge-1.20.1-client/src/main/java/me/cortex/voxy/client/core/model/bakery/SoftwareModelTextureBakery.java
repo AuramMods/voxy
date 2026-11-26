@@ -312,6 +312,7 @@ public class SoftwareModelTextureBakery {
     }
 
     public void free() {
+        this.rasterizer.clearSamplerTexture();
         this.opaqueVC.free();
         this.translucentVC.free();
     }

@@ -6,6 +6,7 @@ import me.cortex.voxy.client.core.gl.shader.ShaderLoader;
 import me.cortex.voxy.client.core.gl.shader.ShaderType;
 import me.cortex.voxy.client.core.rendering.util.LightMapHelper;
 import me.cortex.voxy.common.Logger;
+import me.cortex.voxy.common.util.ExceptionCleanup;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import org.joml.Matrix4f;
@@ -32,12 +33,8 @@ public final class DistantBlockShader {
 
     public static Shader get(AbstractRenderPipeline pipeline, boolean uniformLight) {
         if (patchedOwner != pipeline) {
-            if (patchedShader != null) patchedShader.free();
-            if (patchedUniformShader != null) patchedUniformShader.free();
-            patchedShader = null;
-            patchedUniformShader = null;
+            clearPatchedShaders();
             patchedOwner = pipeline;
-            patchFailed = false;
         }
         if (!patchFailed) {
             try {
@@ -76,6 +73,24 @@ public final class DistantBlockShader {
             else shader = selected;
         }
         return selected;
+    }
+
+    public static void release(AbstractRenderPipeline pipeline) {
+        if (patchedOwner == pipeline) clearPatchedShaders();
+    }
+
+    private static void clearPatchedShaders() {
+        var previous = patchedShader;
+        var previousUniform = patchedUniformShader;
+        patchedOwner = null;
+        patchedShader = null;
+        patchedUniformShader = null;
+        patchFailed = false;
+
+        var cleanup = new ExceptionCleanup(null);
+        if (previous != null) cleanup.run(previous::free);
+        if (previousUniform != null) cleanup.run(previousUniform::free);
+        cleanup.rethrow();
     }
 
     public static void bindTextures() {

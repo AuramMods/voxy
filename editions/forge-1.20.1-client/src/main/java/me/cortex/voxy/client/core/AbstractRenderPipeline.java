@@ -5,6 +5,7 @@ import me.cortex.voxy.common.util.ExceptionCleanup;
 import me.cortex.voxy.client.RenderStatistics;
 import me.cortex.voxy.client.TimingStatistics;
 import me.cortex.voxy.client.VoxyClient;
+import me.cortex.voxy.client.compat.distant.DistantBlockShader;
 import me.cortex.voxy.client.core.model.ModelBakerySubsystem;
 import me.cortex.voxy.client.core.rendering.Viewport;
 import me.cortex.voxy.client.core.rendering.hierachical.AsyncNodeManager;
@@ -246,6 +247,7 @@ public abstract class AbstractRenderPipeline extends TrackedObject {
     }
 
     private void releaseBaseResources(ExceptionCleanup cleanup) {
+        cleanup.run(() -> DistantBlockShader.release(this));
         if (this.sectionRenderer != null) cleanup.run(this.sectionRenderer::free);
         if (this.depthStencilSetup != null) cleanup.run(this.depthStencilSetup::delete);
         if (this.fb != null) cleanup.run(this.fb::free);
