@@ -43,7 +43,7 @@ vec3 _minBB = vec3(0.0f);
 vec3 _maxBB = vec3(0.0f);
 bool _frustumCulled = false;
 
-float _screenSize = 0.0f;
+float _shadowScreenArea = 0.0f;
 
 #ifdef TAA
 vec2 getTAA();
@@ -105,7 +105,7 @@ void setupScreenspace(in UnpackedNode node) {
     vec3 p111 = NDC2SCREEN(P111.xyz/P111.w);
 
 
-    {//Compute exact screenspace size
+    if (shadowPass) {//The orthographic shadow pass uses projected area to choose detail.
         float ssize = 0;
         {//Faces from 0,0,0
 
@@ -125,7 +125,7 @@ void setupScreenspace(in UnpackedNode node) {
             ssize += crossMag(C,B);
         }
         ssize *= 0.5f;//Half the size since we did both back and front area
-        _screenSize = ssize;
+        _shadowScreenArea = ssize;
     }
 
     _minBB = min(min(min(p000, p100), min(p001, p101)), min(min(p010, p110), min(p011, p111)));
@@ -189,12 +189,5 @@ bool isCulledByHiz() {
     depthTestAgainst = _minBB.z;
     #endif
     return DEPTH_SCALAR_COMPARE_EQUAL(pointSample,depthTestAgainst);
-}
-
-
-
-//Returns if we should decend into its children or not
-bool shouldDecend() {
-    return _screenSize > minSSS;
 }
 

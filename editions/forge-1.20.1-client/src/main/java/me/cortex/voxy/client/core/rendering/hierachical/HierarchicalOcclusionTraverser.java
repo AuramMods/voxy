@@ -209,10 +209,9 @@ public class HierarchicalOcclusionTraverser {
 
         //MemoryUtil.memPutFloat(ptr, viewport.height); ptr += 4;
 
-        float subdivision = viewport.isShadowPass() ? 32.0f : VoxyConfig.CONFIG.subDivisionSize;
-        final float screenspaceAreaDecreasingSize = subdivision * subdivision;
-        //Screen space size for descending
-        MemoryUtil.memPutFloat(ptr, (float) (screenspaceAreaDecreasingSize) /(viewport.width*viewport.height)); ptr += 4;
+        final float shadowSubdivisionSize = 32.0f;
+        MemoryUtil.memPutFloat(ptr, shadowSubdivisionSize * shadowSubdivisionSize
+                / (viewport.width * viewport.height)); ptr += 4;
 
         setFrustum(viewport, ptr); ptr += 4*4*6;
 
@@ -235,7 +234,8 @@ public class HierarchicalOcclusionTraverser {
         float lodRadius = me.cortex.voxy.client.network.ClientLodStream.clampRadius(VoxyConfig.CONFIG.getLodRenderDistanceBlocks());
         float radius = viewport.isShadowPass() ? Math.min(lodRadius, viewport.shadowCasterRange) : lodRadius;
         MemoryUtil.memPutFloat(ptr, radius * radius); ptr += 4;
-        MemoryUtil.memPutInt(ptr, viewport.isShadowPass() ? 1 : 0);
+        MemoryUtil.memPutInt(ptr, viewport.isShadowPass() ? 1 : 0); ptr += 4;
+        MemoryUtil.memPutFloat(ptr, (float) viewport.getLodDistanceScaleSquared(VoxyConfig.CONFIG.subDivisionSize));
 
 
     }

@@ -93,6 +93,12 @@ public abstract class Viewport <A extends Viewport<A>> {
         return (A) this;
     }
 
+    public final double getLodDistanceScaleSquared(float subdivisionSize) {
+        double focalArea = Math.abs((double) this.projection.m00() * this.projection.m11())
+                * this.width * this.height / 4.0;
+        return focalArea / ((double) subdivisionSize * subdivisionSize);
+    }
+
     public A update() {
         //MVP
         this.projection.mul(this.modelView, this.MVP);

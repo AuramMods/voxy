@@ -31,8 +31,7 @@ final class ClientLodDemand {
     private final int maxY;
     private final float radiusBlocks;
     private final double radiusSquared;
-    private final double projectionArea;
-    private final double subdivisionArea;
+    private final double lodDistanceScaleSquared;
     private final PriorityQueue<Tile> visible = new PriorityQueue<>(Comparator.comparingDouble(Tile::distanceSquared)
             .thenComparingLong(Tile::key));
 
@@ -45,9 +44,7 @@ final class ClientLodDemand {
         this.maxY = maxY;
         this.radiusBlocks = radiusBlocks;
         this.radiusSquared = (double) radiusBlocks * radiusBlocks;
-        this.projectionArea = Math.abs((double) view.projection.m00() * view.projection.m11())
-                * view.width * view.height / 4;
-        this.subdivisionArea = Math.pow(VoxyConfig.CONFIG.subDivisionSize, 2);
+        this.lodDistanceScaleSquared = view.getLodDistanceScaleSquared(VoxyConfig.CONFIG.subDivisionSize);
     }
 
     long[] plan(LodSectionStorage storage) {
@@ -68,9 +65,9 @@ final class ClientLodDemand {
         for (int i = 0; i < MAX_VISITS && !this.visible.isEmpty() && wanted.size() < MAX_CANDIDATES; i++) {
             var tile = this.visible.remove();
             int size = 32 << tile.level;
-            double area = this.projectionArea * size * size / Math.max(1, tile.distanceSquared);
             var cached = storage.remoteTile(tile.key());
-            if (tile.level > 0 && area > this.subdivisionArea && cached != null && cached.children() != 0) {
+            if (tile.level > 0 && Math.max(1, tile.distanceSquared) < this.lodDistanceScaleSquared * size * size
+                    && cached != null && cached.children() != 0) {
                 for (int child = 0; child < 8; child++) {
                     if ((cached.children() & 1 << child) == 0) continue;
                     this.enqueue(tile.level - 1, tile.x * 2 + (child & 1), tile.y * 2 + (child >> 2),
@@ -116,7 +113,8 @@ final class ClientLodDemand {
         float ymax = (float) (top - this.cameraY);
         double range = distanceToAxis(dx, dx + size) + distanceToAxis(dz, dz + size);
         if (range <= this.radiusSquared && this.frustum.testAab(dx, dy, dz, dx + size, ymax, dz + size)) {
-            this.visible.add(new Tile(level, x, y, z, range + distanceToAxis(dy, ymax)));
+            float sectionY = (float) (y * (double) size - this.cameraY);
+            this.visible.add(new Tile(level, x, y, z, range + distanceToAxis(sectionY, sectionY + size)));
         }
     }
 

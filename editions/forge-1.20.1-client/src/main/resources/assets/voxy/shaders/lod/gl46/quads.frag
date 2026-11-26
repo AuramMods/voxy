@@ -116,7 +116,17 @@ vec3 voxy_applyLodDebugTint(vec3 colour) {
         vec3(0.08, 0.64, 0.60), vec3(0.98, 0.68, 0.45), vec3(0.37, 0.44, 0.89),
         vec3(0.67, 0.47, 0.20), vec3(0.92, 0.60, 0.93), vec3(0.59, 0.82, 0.98),
         vec3(0.90, 0.90, 0.90));
-    return mix(colour, palette[(interData.w >> 8u) & 15u], 0.33);
+    const vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
+    float luma = dot(colour, lumaWeights);
+    vec3 hue = palette[(interData.w >> 8u) & 15u];
+    vec3 chroma = hue - dot(hue, lumaWeights);
+
+    // Fit the palette hue to the texel's brightness, allowing headroom for HDR reflections.
+    float upper = max(1.0, max(colour.r, max(colour.g, colour.b)));
+    float darkLimit = luma / max(0.00001, -min(chroma.r, min(chroma.g, chroma.b)));
+    float lightLimit = (upper - luma) / max(0.00001, max(chroma.r, max(chroma.g, chroma.b)));
+    vec3 tinted = vec3(luma) + chroma * min(darkLimit, lightLimit);
+    return mix(colour, tinted, 0.5);
 }
 #endif
 

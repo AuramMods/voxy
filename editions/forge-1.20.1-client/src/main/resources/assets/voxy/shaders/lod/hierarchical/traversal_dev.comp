@@ -12,13 +12,14 @@ layout(binding = SCENE_UNIFORM_BINDING, std140) uniform SceneUniform {
     ivec3 camSecPos;
     uint packedHizSize;
     vec3 camSubSecPos;
-    float minSSS;
+    float minShadowArea;
     Frustum frustum;
     uint renderQueueMaxSize;
     uint frameId;
     uint requestQueueSize;
     float renderDistance;
     bool shadowPass;
+    float lodDistanceScaleSquared;
 };
 
 #import <voxy:lod/hierarchical/queue.glsl>
@@ -103,6 +104,16 @@ vec3 closestPointToCamera(in UnpackedNode node) {
     return mix(mix(vec3(0), nPos, greaterThan(nPos, vec3(0))), nPos+scale, lessThan(nPos+scale, vec3(0)));
 }
 
+bool shouldDescend(in UnpackedNode node) {
+    if (shadowPass) return _shadowScreenArea > minShadowArea;
+
+    // Estimate projected area at the nearest point using radial distance so rotating the camera
+    // cannot promote a farther section above a closer one of the same size.
+    vec3 nearest = closestPointToCamera(node);
+    float size = float(32 << node.lodLevel);
+    return max(1.0, dot(nearest, nearest)) < lodDistanceScaleSquared * size * size;
+}
+
 vec3 furthestPointToCamera(in UnpackedNode node) {
     vec3 nPos = vec3(((node.pos<<node.lodLevel)-camSecPos)<<5)-camSubSecPos;
     float scale = 1<<(node.lodLevel+5);
@@ -132,7 +143,7 @@ void traverse(in UnpackedNode node) {
         //It is visible, TODO: maybe do a more detailed hiz test? (or make it so that )
 
         //Only decend if not a root node
-        if (node.lodLevel!=0 && shouldDecend()) {
+        if (node.lodLevel != 0 && shouldDescend(node)) {
             if (hasChildren(node)) {
                 //printf("A");
                 enqueueChildren(node);
