@@ -16,12 +16,14 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
+import java.util.regex.Pattern;
 
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL33.*;
@@ -30,6 +32,8 @@ import static org.lwjgl.opengl.GL33.*;
 public class IrisShaderPatch {
     public static final int VERSION = ((IntSupplier) () -> 1).getAsInt();
     public static final int SHADER_DEFINE_VERSION = 2;
+    static final String LEGACY_AURAM_TAA_UNIFORM = "auramVoxyTaaEnabled";
+    private static final Pattern LEGACY_AURAM_TAA_REFERENCE = Pattern.compile("\\b" + LEGACY_AURAM_TAA_UNIFORM + "\\b");
     private static final ThreadLocal<Set<String>> UNIFORMS_BEING_BUILT = new ThreadLocal<>();
 
 
@@ -225,12 +229,24 @@ public class IrisShaderPatch {
     private IrisShaderPatch(PatchGson patchData, ShaderPack pack) {
         this.patchData = patchData;
         this.pack = pack;
+        this.patchData.uniforms = includeLegacyAuramTaaUniform(patchData.uniforms, patchData.taaOffset);
 
         if (patchData.ssbos == null) {
             this.ssbos = new Int2ObjectOpenHashMap<>();
         } else {
             this.ssbos = patchData.ssbos;
         }
+    }
+
+    static String[] includeLegacyAuramTaaUniform(String[] uniforms, String taaSource) {
+        // A shader update can leave a legacy TAA hook beside a newer manifest.
+        if (taaSource == null || !LEGACY_AURAM_TAA_REFERENCE.matcher(taaSource).find()
+                || Arrays.asList(uniforms).contains(LEGACY_AURAM_TAA_UNIFORM)) {
+            return uniforms;
+        }
+        String[] expanded = Arrays.copyOf(uniforms, uniforms.length + 1);
+        expanded[uniforms.length] = LEGACY_AURAM_TAA_UNIFORM;
+        return expanded;
     }
 
     public boolean useViewportDims() {

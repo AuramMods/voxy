@@ -534,6 +534,12 @@ public class IrisVoxyRenderPipelineData {
         IrisRenderingPipelineAccessor pipeline = (IrisRenderingPipelineAccessor)ipipe;
         CommonUniforms.addNonDynamicUniforms(uniformBuilder, pipeline.getPack().getIdMap(), pipeline.getPackDirectives(), pipeline.getUpdateNotifier());
         CommonUniforms.addDynamicUniforms(uniformBuilder, FogMode.PER_FRAGMENT);
+        if (Arrays.asList(patch.getUniformList()).contains(IrisShaderPatch.LEGACY_AURAM_TAA_UNIFORM)) {
+            // Legacy AuramBliss used a conditional custom uniform for a shader-pack option.
+            var options = pipeline.getPack().getShaderPackOptions().getOptionValues();
+            boolean taaEnabled = options.getOptionSet().isBooleanOption("TAA") && options.getBooleanValueOrDefault("TAA");
+            uniformBuilder.uniform1i(IrisShaderPatch.LEGACY_AURAM_TAA_UNIFORM, () -> taaEnabled ? 1 : 0, null);
+        }
         cu.assignTo(uniformBuilder);
         cu.mapholderToPass(uniformBuilder, patch);
 
