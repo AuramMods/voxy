@@ -92,7 +92,10 @@ final class VoxyServerConfigPage implements OptionStorage<CommentedConfig> {
     }
 
     private CommentedConfig load() {
-        if (this.server != null && ServerVoxyConfig.SPEC.isLoaded()) return ServerVoxyConfig.snapshot();
+        if (this.server != null) {
+            var active = ServerLodService.localConfig(this.server);
+            if (active != null) return active;
+        }
         try (var reader = Files.newBufferedReader(this.template)) {
             var config = TomlFormat.instance().createParser().parse(reader);
             ServerVoxyConfig.SPEC.correct(config);

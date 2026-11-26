@@ -42,6 +42,7 @@ public final class ServerLodService implements AutoCloseable {
 
     private final MinecraftServer server;
     private final Path root;
+    private final ServerVoxyConfig config;
     final UUID worldId;
     private final Map<ResourceKey<Level>, Dimension> worlds = new ConcurrentHashMap<>();
     private final AtomicReference<LocalLodTerrain> localTerrain = new AtomicReference<>();
@@ -54,10 +55,11 @@ public final class ServerLodService implements AutoCloseable {
     private ServerLodService(MinecraftServer server) throws IOException {
         this.server = server;
         this.root = server.getWorldPath(LevelResource.ROOT);
+        this.config = ServerVoxyConfig.open(this.root);
         var path = Files.createDirectories(this.root.resolve("voxy-server")).resolve("world-id");
         if (Files.notExists(path)) Files.writeString(path, UUID.randomUUID().toString());
         this.worldId = UUID.fromString(Files.readString(path).trim());
-        int jobs = ServerVoxyConfig.chunkJobs(false);
+        int jobs = this.config.chunkJobs(false);
         this.worker = new ThreadPoolExecutor(jobs, jobs, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), job -> {
             var thread = new Thread(job, "Voxy server storage");
             thread.setDaemon(true);
@@ -70,6 +72,10 @@ public final class ServerLodService implements AutoCloseable {
 
     MinecraftServer server() {
         return this.server;
+    }
+
+    ServerVoxyConfig config() {
+        return this.config;
     }
 
     Dimension dimension(ServerLevel level) {
@@ -135,8 +141,19 @@ public final class ServerLodService implements AutoCloseable {
     public static void applyLocalConfig(MinecraftServer server, CommentedConfig config) {
         if (server.isDedicatedServer()) return;
         server.execute(() -> {
-            if (forServer(server) != null) ServerVoxyConfig.apply(config);
+            var service = forServer(server);
+            if (service != null) service.config.apply(config);
         });
+    }
+
+    public static CommentedConfig localConfig(MinecraftServer server) {
+        var service = forServer(server);
+        return service == null ? null : service.config.snapshot();
+    }
+
+    public static float clampLocalRadius(MinecraftServer server, float blocks) {
+        var service = forServer(server);
+        return service == null ? blocks : Math.min(blocks, service.config.get(ServerVoxyConfig.RADIUS) * 16f);
     }
 
     public static void blockChanged(ServerLevel level, BlockPos position) {
@@ -205,7 +222,7 @@ public final class ServerLodService implements AutoCloseable {
         if (service == null || event.phase != TickEvent.Phase.END) return;
         service.edits.tick(event.getServer().getTickCount());
         boolean playersOnline = !event.getServer().getPlayerList().getPlayers().isEmpty();
-        int jobs = ServerVoxyConfig.chunkJobs(playersOnline);
+        int jobs = service.config.chunkJobs(playersOnline);
         service.resizeWorkers(jobs);
         service.generator.tick(playersOnline, jobs);
         service.streams.tick();

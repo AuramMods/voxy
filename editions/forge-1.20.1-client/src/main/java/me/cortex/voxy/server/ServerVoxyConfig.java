@@ -1,10 +1,13 @@
 package me.cortex.voxy.server;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
+import com.electronwill.nightconfig.core.file.CommentedFileConfig;
 import com.electronwill.nightconfig.toml.TomlFormat;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.common.ForgeConfigSpec;
+import net.minecraftforge.fml.config.ConfigTracker;
 
+import java.nio.file.Path;
 import java.util.List;
 
 public final class ServerVoxyConfig {
@@ -22,6 +25,7 @@ public final class ServerVoxyConfig {
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> SPAWN_DIMENSIONS;
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> SPAWN_ANCHORS;
     private static final List<ForgeConfigSpec.ConfigValue<?>> OPTIONS;
+    private final CommentedConfig data;
 
     static {
         var builder = new ForgeConfigSpec.Builder();
@@ -49,8 +53,27 @@ public final class ServerVoxyConfig {
                 SERVER_STREAM_RATE, SPAWN_DIMENSIONS, SPAWN_ANCHORS);
     }
 
-    static int chunkJobs(boolean playersOnline) {
-        return (playersOnline ? ONLINE_CHUNK_JOBS : IDLE_CHUNK_JOBS).get();
+    ServerVoxyConfig(CommentedConfig data) {
+        this.data = data;
+    }
+
+    static ServerVoxyConfig open(Path worldRoot) {
+        // The client can replace Forge's shared server spec with an in-memory copy after the world opens.
+        var tracked = ConfigTracker.INSTANCE.fileMap().get(FILE_NAME).getConfigData();
+        if (tracked instanceof CommentedFileConfig file) return new ServerVoxyConfig(file);
+
+        var file = CommentedFileConfig.builder(worldRoot.resolve("serverconfig").resolve(FILE_NAME)).sync().build();
+        file.load();
+        SPEC.correct(file);
+        return new ServerVoxyConfig(file);
+    }
+
+    <T> T get(ForgeConfigSpec.ConfigValue<T> option) {
+        return this.data.getOrElse(option.getPath(), option::getDefault);
+    }
+
+    int chunkJobs(boolean playersOnline) {
+        return this.get(playersOnline ? ONLINE_CHUNK_JOBS : IDLE_CHUNK_JOBS);
     }
 
     public static boolean isDimensionId(String value) {
@@ -61,19 +84,15 @@ public final class ServerVoxyConfig {
         return parseAnchor(value) != null;
     }
 
-    public static CommentedConfig snapshot() {
+    CommentedConfig snapshot() {
         var config = TomlFormat.newConfig();
-        for (var value : OPTIONS) config.set(value.getPath(), value.get());
+        for (var value : OPTIONS) config.set(value.getPath(), this.get(value));
         return config;
     }
 
-    static void apply(CommentedConfig config) {
-        for (var value : OPTIONS) apply(config, value);
-        SPEC.save();
-    }
-
-    private static <T> void apply(CommentedConfig config, ForgeConfigSpec.ConfigValue<T> value) {
-        value.set(config.get(value.getPath()));
+    void apply(CommentedConfig config) {
+        for (var value : OPTIONS) this.data.set(value.getPath(), config.get(value.getPath()));
+        if (this.data instanceof CommentedFileConfig file) file.save();
     }
 
     record SpawnAnchor(ResourceLocation dimension, int x, int z) {}
@@ -93,5 +112,4 @@ public final class ServerVoxyConfig {
         }
     }
 
-    private ServerVoxyConfig() {}
 }

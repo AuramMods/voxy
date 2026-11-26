@@ -71,24 +71,26 @@ final class ServerLodStreams {
     private final Map<UUID, Stream> streams = new HashMap<>();
     private final java.util.concurrent.atomic.AtomicInteger tasks = new java.util.concurrent.atomic.AtomicInteger();
     private long nextScope;
-    private final LodStreamBudget budget = new LodStreamBudget(ServerVoxyConfig.SERVER_STREAM_RATE.get(), 0);
+    private final LodStreamBudget budget;
     private final UUID session = UUID.randomUUID();
 
     ServerLodStreams(ServerLodService service, Executor worker) {
         this.service = service;
         this.worker = worker;
+        this.budget = new LodStreamBudget(service.config().get(ServerVoxyConfig.SERVER_STREAM_RATE), 0);
     }
 
     void tick() {
-        this.budget.tick(ServerVoxyConfig.SERVER_STREAM_RATE.get());
-        int playerRate = ServerVoxyConfig.PLAYER_STREAM_RATE.get();
+        var config = this.service.config();
+        this.budget.tick(config.get(ServerVoxyConfig.SERVER_STREAM_RATE));
+        int playerRate = config.get(ServerVoxyConfig.PLAYER_STREAM_RATE);
         int lookups = 0;
         long now = System.nanoTime();
         var online = new HashSet<UUID>();
         for (var player : this.service.server().getPlayerList().getPlayers()) {
             if (player.connection.connection.isMemoryConnection() || !LodChannel.available(player)) continue;
             online.add(player.getUUID());
-            int radius = ServerVoxyConfig.RADIUS.get();
+            int radius = config.get(ServerVoxyConfig.RADIUS);
             var stream = this.streams.get(player.getUUID());
             if (stream == null || stream.player != player || stream.level != player.serverLevel() || stream.radius != radius) {
                 var dimension = this.service.dimension(player.serverLevel());

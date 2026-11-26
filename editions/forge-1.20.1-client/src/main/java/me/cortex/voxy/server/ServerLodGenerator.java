@@ -4,6 +4,7 @@ import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.mixin.minecraft.AccessorChunkMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -21,6 +22,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /** Owns job and ticket lifetimes on the server tick thread. */
 final class ServerLodGenerator {
@@ -40,10 +42,12 @@ final class ServerLodGenerator {
             return new Column(this.anchor.level().dimension(), this.position.toLong());
         }
     }
-    private record Lookup(boolean covered, ServerChunkSnapshot saved) {}
+    private record Lookup(boolean covered, CompoundTag saved) {}
     private record Retry(long readyAt, int attempts) {}
 
     private static final boolean TRACE = Boolean.getBoolean("voxy.traceServerLodJobs");
+    private static final int MAX_BACKFILL_JOBS = 2;
+    private static final int MAX_DEFERRED_BACKFILLS = 4096;
 
     private static final class Job {
         final Candidate target;
@@ -52,14 +56,17 @@ final class ServerLodGenerator {
         final int attempts;
         ServerChunkTicket ticket;
         CompletableFuture<long[]> write;
+        boolean backfill;
         boolean generated;
         boolean needsTicket;
 
-        Job(Candidate target, ServerLodService.Dimension dimension, CompletableFuture<Lookup> lookup, int attempts) {
+        Job(Candidate target, ServerLodService.Dimension dimension, CompletableFuture<Lookup> lookup, int attempts,
+                boolean backfill) {
             this.target = target;
             this.dimension = dimension;
             this.lookup = lookup;
             this.attempts = attempts;
+            this.backfill = backfill;
         }
 
         void releaseTicket() {
@@ -80,6 +87,7 @@ final class ServerLodGenerator {
     private final Executor worker;
     private final Map<Anchor, NearChunkCursor> cursors = new LinkedHashMap<>();
     private final Map<Column, Job> active = new LinkedHashMap<>();
+    private final Map<Column, Integer> deferredBackfills = new LinkedHashMap<>();
     private final Map<Column, Retry> retries = new HashMap<>();
     private final Set<Anchor> finishedOffline = new HashSet<>();
     private final Set<ServerLevel> unloaded = Collections.newSetFromMap(new java.util.WeakHashMap<>());
@@ -98,11 +106,11 @@ final class ServerLodGenerator {
     ServerLodGenerator(ServerLodService service, Executor worker) {
         this.service = service;
         this.worker = worker;
-        this.generationOn = ServerVoxyConfig.GENERATE.get();
+        this.generationOn = service.config().get(ServerVoxyConfig.GENERATE);
     }
 
     void tick(boolean playersOnline, int limit) {
-        boolean enabled = ServerVoxyConfig.GENERATE.get();
+        boolean enabled = this.service.config().get(ServerVoxyConfig.GENERATE);
         if (this.generationOn != enabled) {
             this.generationOn = enabled;
             this.finishedOffline.clear();
@@ -117,10 +125,12 @@ final class ServerLodGenerator {
         }
         Set<Anchor> anchors = this.anchors();
 
+        int backfillLimit = this.generationOn ? Math.min(limit, MAX_BACKFILL_JOBS) : limit;
+        int[] backfillSlots = {backfillLimit - this.activeBackfills()};
         this.active.entrySet().removeIf(entry -> {
             var job = entry.getValue();
             try {
-                return this.advance(job, priorityAt(anchors, entry.getKey()) != null);
+                return this.advance(job, priorityAt(anchors, entry.getKey()) != null, backfillSlots);
             } catch (RuntimeException failure) {
                 this.failed(entry.getKey(), job, failure);
                 return true;
@@ -132,16 +142,38 @@ final class ServerLodGenerator {
             for (var anchor : anchors) {
                 this.cursors.computeIfAbsent(anchor, value -> new NearChunkCursor(value.center(), value.radius()));
             }
+            this.deferredBackfills.keySet().removeIf(key -> priorityAt(anchors, key) == null);
             this.examined.clear();
         }
 
+        this.scheduleBackfills(anchors, backfillLimit - this.activeBackfills());
         int[] visits = {128};
-        for (int count = 0; count < limit && this.active.size() < limit; count++) {
+        int available = limit - this.active.size() + (this.generationOn ? this.activeBackfills() : 0);
+        for (int count = 0; count < available; count++) {
             var next = this.nextCandidate(anchors, visits);
             if (next == null) break;
             this.scheduleNext(next);
         }
         this.issueTickets(anchors, visits, limit);
+    }
+
+    private int activeBackfills() {
+        return (int) this.active.values().stream().filter(job -> job.backfill).count();
+    }
+
+    private void scheduleBackfills(Set<Anchor> anchors, int available) {
+        while (available-- > 0 && !this.deferredBackfills.isEmpty()) {
+            Candidate nearest = null;
+            for (var key : this.deferredBackfills.keySet()) {
+                var candidate = priorityAt(anchors, key);
+                if (candidate != null && (nearest == null || PRIORITY.compare(candidate, nearest) < 0)) {
+                    nearest = candidate;
+                }
+            }
+            if (nearest == null) break;
+            int attempts = this.deferredBackfills.remove(nearest.column());
+            this.schedule(nearest, attempts, true);
+        }
     }
 
     private Candidate nextCandidate(Set<Anchor> anchors, int[] visits) {
@@ -156,14 +188,15 @@ final class ServerLodGenerator {
             this.cursors.get(candidate.anchor()).advance();
             this.examined.add(candidate.column());
         }
-        this.schedule(candidate, retry == null ? 0 : retry.attempts());
+        this.schedule(candidate, retry == null ? 0 : retry.attempts(), false);
     }
 
     private void issueTickets(Set<Anchor> anchors, int[] visits, int limit) {
         if (!this.generationOn || visits[0] < 0) return;
-        long running = this.active.values().stream().filter(job -> job.ticket != null || job.write != null).count();
+        long running = this.active.values().stream()
+                .filter(job -> !job.backfill && (job.ticket != null || job.write != null)).count();
         var ready = this.active.entrySet().stream()
-                .filter(entry -> entry.getValue().write == null && entry.getValue().ticket == null)
+                .filter(entry -> !entry.getValue().backfill && entry.getValue().write == null && entry.getValue().ticket == null)
                 .map(entry -> priorityAt(anchors, entry.getKey()))
                 .filter(java.util.Objects::nonNull)
                 .sorted(PRIORITY)
@@ -232,6 +265,7 @@ final class ServerLodGenerator {
             if (nearest == null) return null;
             var key = nearest.column();
             if (!this.examined.contains(key) && !this.retries.containsKey(key) && !this.active.containsKey(key)
+                    && !this.deferredBackfills.containsKey(key)
                     && nearest.anchor.level().getWorldBorder().isWithinBounds(nearest.position())) {
                 return nearest;
             }
@@ -256,24 +290,24 @@ final class ServerLodGenerator {
         return nearest;
     }
 
-    private void schedule(Candidate target, int attempts) {
+    private void schedule(Candidate target, int attempts, boolean backfill) {
         var level = target.anchor.level();
         var dimension = this.service.dimension(level);
         var map = (AccessorChunkMap) level.getChunkSource().chunkMap;
         var position = target.position();
         var future = CompletableFuture.supplyAsync(() -> dimension.storage().hasColumn(position.toLong()), this.worker)
                 .thenCompose(covered -> covered ? CompletableFuture.completedFuture(new Lookup(true, null))
-                        : map.voxy$readSavedChunk(position).thenApplyAsync(saved -> new Lookup(false,
-                        saved.flatMap(tag -> ServerChunkSnapshot.fromSaved(level, position, tag)).orElse(null)), this.worker));
-        this.active.put(target.column(), new Job(target, dimension, future, attempts));
+                        : map.voxy$readSavedChunk(position).thenApply(saved -> new Lookup(false,
+                        saved.filter(ServerChunkSnapshot::isFull).orElse(null))));
+        this.active.put(target.column(), new Job(target, dimension, future, attempts, backfill));
     }
 
-    private boolean advance(Job job, boolean eligible) {
+    private boolean advance(Job job, boolean eligible, int[] backfillSlots) {
         if (job.write != null) {
             if (!job.write.isDone()) return false;
             var changed = job.write.join();
             if (changed != null) {
-                this.service.publishLocal(job.target.anchor.level(), changed);
+                this.service.publish(job.target.anchor.level(), changed);
                 if (job.generated) this.generated++;
                 else this.imported++;
             }
@@ -307,11 +341,25 @@ final class ServerLodGenerator {
         var result = job.lookup.join();
         if (result.covered()) return true;
         var loaded = level.getChunkSource().getChunkNow(pos.x, pos.z);
-        if (loaded != null && loaded.isLightCorrect()) {
-            this.write(job, ServerChunkSnapshot.fromLive(level, loaded));
-        } else if (result.saved() != null) {
-            this.write(job, result.saved());
+        boolean readyLive = loaded != null && loaded.isLightCorrect();
+        if (readyLive || result.saved() != null) {
+            if (!job.backfill) {
+                if (backfillSlots[0] <= 0 || !this.deferredBackfills.isEmpty()) {
+                    if (this.deferredBackfills.size() >= MAX_DEFERRED_BACKFILLS) return false;
+                    // Remember just the column. Holding decoded snapshots would cap how far we can look ahead.
+                    this.deferredBackfills.put(job.target.column(), job.attempts);
+                    return true;
+                }
+                backfillSlots[0]--;
+                job.backfill = true;
+            }
+            if (readyLive) {
+                this.write(job, ServerChunkSnapshot.fromLive(level, loaded));
+            } else {
+                this.write(job, () -> ServerChunkSnapshot.fromSaved(level, pos, result.saved()).orElseThrow());
+            }
         } else if (this.generationOn) {
+            job.backfill = false;
             job.generated = loaded == null;
             job.needsTicket = true;
         } else {
@@ -321,9 +369,14 @@ final class ServerLodGenerator {
     }
 
     private void write(Job job, ServerChunkSnapshot snapshot) {
+        this.write(job, () -> snapshot);
+    }
+
+    private void write(Job job, Supplier<ServerChunkSnapshot> prepare) {
         var level = job.target.anchor().level();
-        long key = snapshot.position().toLong();
+        long key = job.target.position().toLong();
         job.write = CompletableFuture.supplyAsync(() -> {
+            var snapshot = prepare.get();
             synchronized (job.dimension) {
                 if (job.dimension.storage().hasColumn(key) || this.service.pendingEdit(level, key)) return null;
                 return ServerColumnWriter.commit(job.dimension.world(), job.dimension.storage(), snapshot,
@@ -333,7 +386,8 @@ final class ServerLodGenerator {
     }
 
     private Set<Anchor> anchors() {
-        int radius = ServerVoxyConfig.RADIUS.get();
+        var config = this.service.config();
+        int radius = config.get(ServerVoxyConfig.RADIUS);
         var server = this.service.server();
         var players = server.getPlayerList().getPlayers();
         var anchors = new LinkedHashSet<Anchor>();
@@ -345,16 +399,16 @@ final class ServerLodGenerator {
                 occupied.add(level.dimension());
                 anchors.add(new Anchor(level, player.chunkPosition(), radius));
             }
-            for (String configured : ServerVoxyConfig.SPAWN_DIMENSIONS.get()) {
+            for (String configured : config.get(ServerVoxyConfig.SPAWN_DIMENSIONS)) {
                 var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(configured));
-                if (occupied.contains(key)) anchors.add(spawnAnchor(server.getLevel(key), radius));
+                if (occupied.contains(key)) anchors.add(spawnAnchor(server.getLevel(key), radius, config));
             }
         } else {
-            for (String configured : ServerVoxyConfig.SPAWN_DIMENSIONS.get()) {
+            for (String configured : config.get(ServerVoxyConfig.SPAWN_DIMENSIONS)) {
                 var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(configured));
                 var level = server.getLevel(key);
                 if (level == null || this.unloaded.contains(level)) continue;
-                var anchor = spawnAnchor(level, radius);
+                var anchor = spawnAnchor(level, radius, config);
                 if (this.finishedOffline.contains(anchor)) continue;
                 var cursor = this.cursors.get(anchor);
                 if (cursor != null && cursor.peek() == null && !this.isUnfinished(anchor)) {
@@ -372,6 +426,7 @@ final class ServerLodGenerator {
 
     private boolean isUnfinished(Anchor anchor) {
         return this.active.keySet().stream().anyMatch(key -> applies(anchor, key))
+                || this.deferredBackfills.keySet().stream().anyMatch(key -> applies(anchor, key))
                 || this.retries.keySet().stream().anyMatch(key -> applies(anchor, key));
     }
 
@@ -381,7 +436,7 @@ final class ServerLodGenerator {
                 && anchor.level().getWorldBorder().isWithinBounds(position);
     }
 
-    private static Anchor spawnAnchor(ServerLevel level, int radius) {
+    private static Anchor spawnAnchor(ServerLevel level, int radius, ServerVoxyConfig config) {
         var id = level.dimension().location();
         BlockPos spawn = BlockPos.ZERO;
         if (level == level.getServer().overworld()) {
@@ -390,7 +445,7 @@ final class ServerLodGenerator {
             var border = level.getWorldBorder();
             if (!border.isWithinBounds(spawn)) spawn = BlockPos.containing(border.getCenterX(), 0, border.getCenterZ());
         }
-        for (String value : ServerVoxyConfig.SPAWN_ANCHORS.get()) {
+        for (String value : config.get(ServerVoxyConfig.SPAWN_ANCHORS)) {
             var anchor = ServerVoxyConfig.parseAnchor(value);
             if (anchor != null && anchor.dimension().equals(id)) {
                 spawn = new BlockPos(anchor.x(), 0, anchor.z());

@@ -14,8 +14,8 @@ Copy that template to `<world>/serverconfig/voxy-server.toml` for an existing de
 | --- | --- | --- |
 | `distantGeneration` | `true` | Generate missing chunks. Turn this off to stream cached LODs and backfill chunks Minecraft has already saved. |
 | `radiusChunks` | `256` | Horizontal radius in Minecraft chunks for server generation and streaming. The client rendering cutoff also defaults to 256 chunks and can be lowered locally. |
-| `chunkJobs` | `4` | Maximum concurrent Voxy generation and backfill jobs with players online, including the singleplayer host. Existing configurations keep this value. |
-| `idleChunkJobs` | `4` | Maximum concurrent Voxy generation and backfill jobs when no players are online. |
+| `chunkJobs` | `4` | Maximum concurrent Voxy generation jobs with players online, including the singleplayer host. Also limits saved-chunk backfill when generation is off. |
+| `idleChunkJobs` | `4` | The corresponding job limit when no players are online. |
 | `playerStreamKiBPerSecond` | `512` | Voxy LOD bandwidth budget per remote player, in KiB/s at 20 TPS. |
 | `serverStreamKiBPerSecond` | `2048` | Combined Voxy LOD bandwidth budget for all remote players, in KiB/s at 20 TPS. |
 | `spawnDimensions` | `['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end']` | Ordered list of dimensions with spawn anchors. IDs for missing dimensions can stay in the list. |
@@ -25,7 +25,7 @@ With players online, the generator considers only dimensions with at least one p
 
 When nobody is online, Voxy fills the spawn radius of the first available dimension with unfinished coverage. It completes that dimension before issuing a ticket for the next one. The console reports chunks per second every 60 seconds, including newly generated and reused chunks, dimensions that were generating, and active ticket count. Start a disposable server with `-Dvoxy.traceServerLodJobs=true` to log individual ticket acquisitions and releases.
 
-The server switches job limits as players join or leave. Previously started work can finish when the limit drops. Minecraft manages the world-generation threads and can load dependency chunks for each Voxy ticket.
+The server switches job limits as players join or leave. Previously started work can finish when the limit drops. With generation enabled, Voxy can backfill up to two saved columns concurrently while it searches for and generates missing terrain. The generation job limit controls Voxy's outstanding work. Minecraft manages the actual world-generation threads and can load dependency chunks for each Voxy ticket.
 
 ## Persistence and reconnects
 

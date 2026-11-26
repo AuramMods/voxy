@@ -19,7 +19,7 @@ class ServerVoxyConfigTest {
     }
 
     @Test
-    void selectsTheLimitFromTheSameTomlUsedByAnIntegratedServer() {
+    void keepsTheWorldConfigWhenClientLoadingReplacesTheForgeSpec() {
         var format = TomlFormat.instance();
         var template = format.createParser().parse("""
                 distantGeneration = false
@@ -33,13 +33,20 @@ class ServerVoxyConfigTest {
         var worldConfig = format.createParser().parse(format.createWriter().writeToString(template));
         assertTrue(ServerVoxyConfig.SPEC.isCorrect(worldConfig));
 
-        ServerVoxyConfig.SPEC.setConfig(worldConfig);
+        var server = new ServerVoxyConfig(worldConfig);
+        var clientDefaults = TomlFormat.newConfig();
+        ServerVoxyConfig.SPEC.correct(clientDefaults);
+        ServerVoxyConfig.SPEC.setConfig(clientDefaults);
         try {
-            assertEquals(2, ServerVoxyConfig.chunkJobs(true));
-            assertEquals(6, ServerVoxyConfig.chunkJobs(false));
-            var snapshot = ServerVoxyConfig.snapshot();
+            assertEquals(2, server.chunkJobs(true));
+            assertEquals(6, server.chunkJobs(false));
+            var snapshot = server.snapshot();
             assertEquals(List.of("future:world", "minecraft:overworld"), snapshot.get("spawnDimensions"));
             assertEquals(List.of("future:world=-64,32"), snapshot.get("spawnAnchors"));
+            snapshot.set("chunkJobs", 12);
+            server.apply(snapshot);
+            assertEquals(12, worldConfig.getInt("chunkJobs"));
+            assertEquals(4, clientDefaults.getInt("chunkJobs"));
         } finally {
             ServerVoxyConfig.SPEC.setConfig(null);
         }

@@ -79,8 +79,12 @@ record ServerChunkSnapshot(ChunkPos position, int minSection, Section[] sections
         return copy;
     }
 
+    static boolean isFull(CompoundTag chunk) {
+        return ChunkStatus.byName(chunk.getString("Status")) == ChunkStatus.FULL;
+    }
+
     static Optional<ServerChunkSnapshot> fromSaved(ServerLevel level, ChunkPos position, CompoundTag chunk) {
-        if (ChunkStatus.byName(chunk.getString("Status")) != ChunkStatus.FULL) return Optional.empty();
+        if (!isFull(chunk)) return Optional.empty();
         if (chunk.getInt("xPos") != position.x || chunk.getInt("zPos") != position.z) {
             throw new IllegalArgumentException("Incorrect saved chunk position at " + position);
         }

@@ -14,7 +14,6 @@ import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
 import me.cortex.voxy.server.ServerLodService;
-import me.cortex.voxy.server.ServerVoxyConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.RegistryAccess;
 import net.minecraftforge.api.distmarker.Dist;
@@ -101,7 +100,7 @@ public final class ClientLodStream {
 
     public static float clampRadius(float blocks) {
         if (isReadingLocalTerrain()) {
-            return Math.min(blocks, ServerVoxyConfig.RADIUS.get() * 16f);
+            return ServerLodService.clampLocalRadius(Minecraft.getInstance().getSingleplayerServer(), blocks);
         }
         var ready = announced;
         var level = Minecraft.getInstance().level;
