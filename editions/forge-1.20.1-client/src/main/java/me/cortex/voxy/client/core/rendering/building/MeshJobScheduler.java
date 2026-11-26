@@ -9,7 +9,7 @@ import java.util.function.LongSupplier;
 /** Paces starts from the mesh priority queue without occupying a worker while it waits. */
 final class MeshJobScheduler {
     private static final long SECOND = TimeUnit.SECONDS.toNanos(1);
-    private static final int QUEUE_SCALE = 1_000;
+    private static final int QUEUE_SCALE = 512;
     private static final ScheduledThreadPoolExecutor TIMER = createTimer();
 
     private final Runnable submitJob;

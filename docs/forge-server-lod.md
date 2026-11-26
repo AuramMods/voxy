@@ -21,7 +21,9 @@ Copy that template to `<world>/serverconfig/voxy-server.toml` for an existing de
 | `spawnDimensions` | `['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end']` | Ordered list of dimensions with spawn anchors. IDs for missing dimensions can stay in the list. |
 | `spawnAnchors` | `[]` | Optional overrides in `dimension=x,z` form using block coordinates. The Overworld uses its saved spawn and other dimensions default to X/Z `0,0`. |
 
-With players online, the generator considers only occupied dimensions. Distance bands are two chunks wide. Within the same band, the generator favors terrain in the player's horizontal look direction. Turning changes the priority of pending work. An occupied dimension can also contribute a configured spawn anchor, with a 16-chunk scheduling penalty so nearby player coverage comes first.
+With players online, the generator prioritizes occupied dimensions. Distance bands are two chunks wide. Within the same band, the generator favors terrain in the player's horizontal look direction. Turning changes the priority of pending work. An occupied dimension can also contribute a configured spawn anchor, with a 16-chunk scheduling penalty so nearby player coverage comes first.
+
+Once the configured radius around every player and every spawn anchor in an occupied dimension has full chunks, Voxy can work on the next configured unoccupied dimension using `chunkJobs`. Saved full chunks count toward coverage while their LOD backfills finish. As soon as an occupied dimension needs coverage again, Voxy stops issuing tickets in unoccupied dimensions and lets existing tickets finish.
 
 When nobody is online, Voxy fills the spawn radius of the first available dimension with unfinished coverage. It completes that dimension before issuing a ticket for the next one. The console reports chunks per second every 60 seconds, including newly generated and reused chunks, dimensions that were generating, and active ticket count. Start a disposable server with `-Dvoxy.traceServerLodJobs=true` to log individual ticket acquisitions and releases.
 

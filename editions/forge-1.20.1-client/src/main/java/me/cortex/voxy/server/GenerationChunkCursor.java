@@ -59,6 +59,10 @@ final class GenerationChunkCursor {
         return best;
     }
 
+    boolean isExhausted() {
+        return this.pending.isEmpty() && this.source.peek() == null;
+    }
+
     void advance(ChunkPos position) {
         this.pending.removeIf(candidate -> candidate.position().equals(position));
     }

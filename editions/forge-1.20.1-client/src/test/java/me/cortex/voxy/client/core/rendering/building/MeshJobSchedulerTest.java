@@ -109,16 +109,16 @@ class MeshJobSchedulerTest {
     @Test
     void scaledRateFloorsTheFractionalIncreaseAndKeepsTheBaseMinimum() {
         assertEquals(50, MeshJobScheduler.scaledRate(50, 250));
-        assertEquals(50, MeshJobScheduler.scaledRate(50, 1_000));
-        assertEquals(62, MeshJobScheduler.scaledRate(50, 1_250));
-        assertEquals(100, MeshJobScheduler.scaledRate(50, 2_000));
+        assertEquals(50, MeshJobScheduler.scaledRate(50, 512));
+        assertEquals(62, MeshJobScheduler.scaledRate(50, 640));
+        assertEquals(100, MeshJobScheduler.scaledRate(50, 1_024));
     }
 
     @Test
     void pruningRecomputesTheRateAndAnEmptyPermitDoesNotConsumeASlot() {
         var clock = new AtomicLong();
         var starts = new AtomicInteger();
-        var queued = new AtomicInteger(2_000);
+        var queued = new AtomicInteger(1_024);
         var scheduler = new MeshJobScheduler(starts::incrementAndGet, queued::get, 50, 0, clock::get);
         try {
             clock.set(TimeUnit.MILLISECONDS.toNanos(10));
@@ -132,7 +132,7 @@ class MeshJobSchedulerTest {
             scheduler.queueChanged();
             assertEquals(1, starts.get());
 
-            queued.set(2_000);
+            queued.set(1_024);
             scheduler.queueChanged();
             assertEquals(2, starts.get());
         } finally {

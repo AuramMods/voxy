@@ -8,7 +8,7 @@
   "voxy.config.general": "常规",
   "voxy.config.rendering": "渲染",
   "voxy.config.rendering.meshJobsPerSecond": "每秒网格任务数",
-  "voxy.config.rendering.meshJobsPerSecond.tooltip": "地形网格任务的基础启动速率。排队任务超过 1,000 个时，速率随队列长度按比例提高。在 Just Zoom 缩放或 Dynamic FPS 空闲限帧期间暂停限制。",
+  "voxy.config.rendering.meshJobsPerSecond.tooltip": "地形网格任务的基础启动速率。排队任务超过 512 个时，速率随队列长度按比例提高。在 Just Zoom 缩放或 Dynamic FPS 空闲限帧期间暂停限制。",
   "voxy.config.rendering.meshJobsPerSecond.unlimited": "无限制",
   "voxy.config.rendering.meshJobsPerSecond.rate": "%s 个任务/秒",
   "voxy.config.rendering.meshWarmupSeconds": "网格预热不限速时长",

@@ -58,7 +58,7 @@
   "voxy.config.general.renderPressure.3": "Fast catch-up",
   "voxy.config.general.renderPressure.4": "Maximum catch-up",
   "voxy.config.rendering.meshJobsPerSecond": "Mesh jobs per second",
-  "voxy.config.rendering.meshJobsPerSecond.tooltip": "Base rate for starting terrain mesh jobs. Above 1,000 queued jobs the rate rises in proportion to the queue size. Just Zoom and Dynamic FPS idle throttling temporarily lift the limit.",
+  "voxy.config.rendering.meshJobsPerSecond.tooltip": "Base rate for starting terrain mesh jobs. Above 512 queued jobs the rate rises in proportion to the queue size. Just Zoom and Dynamic FPS idle throttling temporarily lift the limit.",
   "voxy.config.rendering.meshJobsPerSecond.unlimited": "Unlimited",
   "voxy.config.rendering.meshJobsPerSecond.rate": "%s jobs/s",
   "voxy.config.rendering.meshWarmupSeconds": "Uncapped mesh warm-up",

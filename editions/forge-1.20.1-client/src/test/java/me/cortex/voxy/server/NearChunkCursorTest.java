@@ -78,6 +78,20 @@ class NearChunkCursorTest {
     }
 
     @Test
+    void aScanIsUnfinishedUntilTheLastLookaheadCandidateIsHandled() {
+        var cursor = new GenerationChunkCursor(new ChunkPos(0, 0), 1);
+        var view = GenerationChunkCursor.View.OMNIDIRECTIONAL;
+        assertFalse(cursor.isExhausted());
+        for (int i = 0; i < 5; i++) {
+            var next = cursor.peek(view);
+            assertNotNull(next);
+            assertFalse(cursor.isExhausted());
+            cursor.advance(next.position());
+        }
+        assertTrue(cursor.isExhausted());
+    }
+
+    @Test
     void nearbyPlayersHavePriorityOverTheOnlineSpawnAnchor() {
         var center = new ChunkPos(0, 0);
         var view = GenerationChunkCursor.View.fromYaw(90);

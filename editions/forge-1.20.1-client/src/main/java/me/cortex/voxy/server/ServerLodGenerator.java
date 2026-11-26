@@ -35,6 +35,10 @@ final class ServerLodGenerator {
             return this.onlineSpawn ? GenerationChunkCursor.View.ONLINE_SPAWN : GenerationChunkCursor.View.OMNIDIRECTIONAL;
         }
 
+        Anchor scanKey() {
+            return this.onlineSpawn ? new Anchor(this.level, this.center, this.radius, null, false) : this;
+        }
+
         long distance(ChunkPos position) {
             long dx = (long) this.center.x - position.x;
             long dz = (long) this.center.z - position.z;
@@ -58,6 +62,7 @@ final class ServerLodGenerator {
     private static final boolean TRACE = Boolean.getBoolean("voxy.traceServerLodJobs");
     private static final int MAX_BACKFILL_JOBS = 2;
     private static final int MAX_DEFERRED_BACKFILLS = 4096;
+    private static final int MAX_RETRIES_PER_SCAN = 2048;
 
     private static final class Job {
         final Candidate target;
@@ -100,7 +105,8 @@ final class ServerLodGenerator {
     private final Map<Column, Job> active = new LinkedHashMap<>();
     private final Map<Column, Integer> deferredBackfills = new LinkedHashMap<>();
     private final Map<Column, Retry> retries = new HashMap<>();
-    private final Set<Anchor> finishedOffline = new HashSet<>();
+    private final Set<Anchor> finishedSpawnScans = new HashSet<>();
+    private Set<Anchor> previousEligible = Set.of();
     private final Set<ServerLevel> unloaded = Collections.newSetFromMap(new java.util.WeakHashMap<>());
     private final Set<Column> examined = Collections.newSetFromMap(new LinkedHashMap<>() {
         @Override
@@ -110,7 +116,6 @@ final class ServerLodGenerator {
     });
     private final Set<ResourceLocation> workedDimensions = new LinkedHashSet<>();
     private boolean generationOn;
-    private boolean hadPlayers;
     private int imported;
     private int generated;
 
@@ -124,48 +129,86 @@ final class ServerLodGenerator {
         boolean enabled = this.service.config().get(ServerVoxyConfig.GENERATE);
         if (this.generationOn != enabled) {
             this.generationOn = enabled;
-            this.finishedOffline.clear();
+            this.finishedSpawnScans.clear();
             this.cursors.clear();
             this.examined.clear();
         }
 
-        if (this.hadPlayers != playersOnline) {
-            this.hadPlayers = playersOnline;
-            this.cursors.clear();
+        Set<Anchor> foreground = new LinkedHashSet<>();
+        Set<Anchor> spawnAnchors = new LinkedHashSet<>();
+        this.collectAnchors(foreground, spawnAnchors);
+        Set<Anchor> eligible = new LinkedHashSet<>(foreground);
+        if (!playersOnline || this.generationOn) eligible.addAll(spawnAnchors);
+
+        if (!this.previousEligible.equals(eligible)) {
+            var retained = new HashSet<Anchor>();
+            for (var anchor : eligible) retained.add(anchor.scanKey());
+            this.cursors.keySet().retainAll(retained);
+            this.finishedSpawnScans.retainAll(retained);
+            this.deferredBackfills.keySet().removeIf(key -> !inScope(eligible, key));
             this.examined.clear();
+            this.previousEligible = eligible;
         }
-        Set<Anchor> anchors = this.anchors();
+        for (var anchor : foreground) this.cursor(anchor);
 
         int backfillLimit = this.generationOn ? Math.min(limit, MAX_BACKFILL_JOBS) : limit;
         int[] backfillSlots = {backfillLimit - this.activeBackfills()};
         this.active.entrySet().removeIf(entry -> {
             var job = entry.getValue();
             try {
-                return this.advance(job, priorityAt(anchors, entry.getKey()) != null, backfillSlots);
+                return this.advance(job, inScope(eligible, entry.getKey()), backfillSlots);
             } catch (RuntimeException failure) {
                 this.failed(entry.getKey(), job, failure);
                 return true;
             }
         });
 
-        if (!this.cursors.keySet().equals(anchors)) {
-            this.cursors.keySet().retainAll(anchors);
-            for (var anchor : anchors) {
-                this.cursors.computeIfAbsent(anchor, value -> new GenerationChunkCursor(value.center(), value.radius()));
-            }
-            this.deferredBackfills.keySet().removeIf(key -> priorityAt(anchors, key) == null);
-            this.examined.clear();
+        Anchor idle = null;
+        if (!playersOnline || (this.generationOn && this.hasFullForegroundCoverage(foreground))) {
+            idle = this.nextIdleAnchor(spawnAnchors);
         }
 
-        this.scheduleBackfills(anchors, backfillLimit - this.activeBackfills());
+        Set<Anchor> ticketAnchors = idle == null ? foreground : Set.of(idle);
+        this.parkUnissuedTickets(ticketAnchors);
+        this.scheduleBackfills(foreground, backfillLimit - this.activeBackfills());
+        if (idle != null) this.scheduleBackfills(ticketAnchors, backfillLimit - this.activeBackfills());
+
         int[] visits = {128};
         int available = limit - this.active.size() + (this.generationOn ? this.activeBackfills() : 0);
         for (int count = 0; count < available; count++) {
-            var next = this.nextCandidate(anchors, visits);
+            var next = this.nextCandidate(ticketAnchors, visits);
             if (next == null) break;
             this.scheduleNext(next);
         }
-        this.issueTickets(anchors, visits, limit);
+        this.issueTickets(ticketAnchors, visits, limit);
+    }
+
+    private GenerationChunkCursor cursor(Anchor anchor) {
+        return this.cursors.computeIfAbsent(anchor.scanKey(), key -> new GenerationChunkCursor(key.center(), key.radius()));
+    }
+
+    private boolean hasFullForegroundCoverage(Set<Anchor> anchors) {
+        for (var anchor : anchors) {
+            if (!this.cursor(anchor).isExhausted()) return false;
+        }
+        for (var entry : this.active.entrySet()) {
+            var job = entry.getValue();
+            // Only unresolved lookups and Minecraft generation block background tickets. Writes already have full terrain.
+            if (!job.backfill && job.write == null && inScope(anchors, entry.getKey())) return false;
+        }
+        return this.retries.keySet().stream().noneMatch(key -> inScope(anchors, key));
+    }
+
+    private void parkUnissuedTickets(Set<Anchor> anchors) {
+        var jobs = this.active.entrySet().iterator();
+        while (jobs.hasNext()) {
+            var entry = jobs.next();
+            var job = entry.getValue();
+            if (!job.needsTicket || job.ticket != null || job.write != null || inScope(anchors, entry.getKey())) continue;
+            // The cursor has passed this column. Keep it retryable while unissued background work yields its slot.
+            this.retries.put(entry.getKey(), new Retry(0, job.attempts));
+            jobs.remove();
+        }
     }
 
     private int activeBackfills() {
@@ -188,7 +231,10 @@ final class ServerLodGenerator {
     }
 
     private Candidate nextCandidate(Set<Anchor> anchors, int[] visits) {
-        var next = this.retries.size() < 2048 ? this.nextFresh(visits) : null;
+        boolean canScan = this.retries.size() < MAX_RETRIES_PER_SCAN
+                || this.retries.keySet().stream().filter(key -> inScope(anchors, key))
+                .limit(MAX_RETRIES_PER_SCAN).count() < MAX_RETRIES_PER_SCAN;
+        var next = canScan ? this.nextFresh(anchors, visits) : null;
         var retry = this.nextRetry(anchors, System.nanoTime());
         return retry != null && (next == null || PRIORITY.compare(retry, next) < 0) ? retry : next;
     }
@@ -196,7 +242,7 @@ final class ServerLodGenerator {
     private void scheduleNext(Candidate candidate) {
         var retry = this.retries.remove(candidate.column());
         if (retry == null) {
-            this.cursors.get(candidate.anchor()).advance(candidate.position());
+            this.cursor(candidate.anchor()).advance(candidate.position());
             this.examined.add(candidate.column());
         }
         this.schedule(candidate, retry == null ? 0 : retry.attempts(), false);
@@ -264,14 +310,14 @@ final class ServerLodGenerator {
         return best;
     }
 
-    private Candidate nextFresh(int[] visits) {
+    private Candidate nextFresh(Set<Anchor> anchors, int[] visits) {
         while (visits[0]-- > 0) {
             Candidate nearest = null;
-            for (var entry : this.cursors.entrySet()) {
-                var view = entry.getKey().view();
-                var candidate = entry.getValue().peek(view);
+            for (var anchor : anchors) {
+                var view = anchor.view();
+                var candidate = this.cursor(anchor).peek(view);
                 if (candidate == null) continue;
-                var current = new Candidate(entry.getKey(), candidate.position(), candidate.distanceSquared(), view);
+                var current = new Candidate(anchor, candidate.position(), candidate.distanceSquared(), view);
                 if (nearest == null || PRIORITY.compare(current, nearest) < 0) nearest = current;
             }
             if (nearest == null) return null;
@@ -281,7 +327,7 @@ final class ServerLodGenerator {
                     && nearest.anchor.level().getWorldBorder().isWithinBounds(nearest.position())) {
                 return nearest;
             }
-            this.cursors.get(nearest.anchor()).advance(nearest.position());
+            this.cursor(nearest.anchor()).advance(nearest.position());
         }
         return null;
     }
@@ -399,43 +445,37 @@ final class ServerLodGenerator {
         }, this.worker);
     }
 
-    private Set<Anchor> anchors() {
+    private void collectAnchors(Set<Anchor> foreground, Set<Anchor> idle) {
         var config = this.service.config();
         int radius = config.get(ServerVoxyConfig.RADIUS);
         var server = this.service.server();
-        var players = server.getPlayerList().getPlayers();
-        var anchors = new LinkedHashSet<Anchor>();
-        if (!players.isEmpty()) {
-            var occupied = new HashSet<ResourceKey<Level>>();
-            for (var player : players) {
-                var level = player.serverLevel();
-                if (this.unloaded.contains(level)) continue;
-                occupied.add(level.dimension());
-                anchors.add(new Anchor(level, player.chunkPosition(), radius, player, false));
-            }
-            for (String configured : config.get(ServerVoxyConfig.SPAWN_DIMENSIONS)) {
-                var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(configured));
-                if (occupied.contains(key)) anchors.add(spawnAnchor(server.getLevel(key), radius, config, true));
-            }
-        } else {
-            for (String configured : config.get(ServerVoxyConfig.SPAWN_DIMENSIONS)) {
-                var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(configured));
-                var level = server.getLevel(key);
-                if (level == null || this.unloaded.contains(level)) continue;
-                var anchor = spawnAnchor(level, radius, config, false);
-                if (this.finishedOffline.contains(anchor)) continue;
-                var cursor = this.cursors.get(anchor);
-                if (cursor != null && cursor.peek(anchor.view()) == null && !this.isUnfinished(anchor)) {
-                    this.finishedOffline.add(anchor);
-                    String finished = this.generationOn ? "finished idle spawn coverage" : "finished idle saved-column scan";
-                    Logger.info("Voxy " + finished + " in " + key.location() + " at radius " + radius);
-                    continue;
-                }
-                anchors.add(anchor);
-                break;
-            }
+        var occupied = new HashSet<ResourceKey<Level>>();
+        for (var player : server.getPlayerList().getPlayers()) {
+            var level = player.serverLevel();
+            if (this.unloaded.contains(level)) continue;
+            occupied.add(level.dimension());
+            foreground.add(new Anchor(level, player.chunkPosition(), radius, player, false));
         }
-        return anchors;
+
+        for (String configured : config.get(ServerVoxyConfig.SPAWN_DIMENSIONS)) {
+            var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(configured));
+            var level = server.getLevel(key);
+            if (level == null || this.unloaded.contains(level)) continue;
+            if (occupied.contains(key)) foreground.add(spawnAnchor(level, radius, config, true));
+            else idle.add(spawnAnchor(level, radius, config, false));
+        }
+    }
+
+    private Anchor nextIdleAnchor(Set<Anchor> anchors) {
+        for (var anchor : anchors) {
+            if (this.finishedSpawnScans.contains(anchor)) continue;
+            if (!this.cursor(anchor).isExhausted() || this.isUnfinished(anchor)) return anchor;
+
+            this.finishedSpawnScans.add(anchor);
+            String finished = this.generationOn ? "finished idle spawn coverage" : "finished idle saved-column scan";
+            Logger.info("Voxy " + finished + " in " + anchor.level().dimension().location() + " at radius " + anchor.radius());
+        }
+        return null;
     }
 
     private boolean isUnfinished(Anchor anchor) {
@@ -444,10 +484,17 @@ final class ServerLodGenerator {
                 || this.retries.keySet().stream().anyMatch(key -> applies(anchor, key));
     }
 
+    private static boolean inScope(Set<Anchor> anchors, Column column) {
+        for (var anchor : anchors) {
+            if (applies(anchor, column)) return true;
+        }
+        return false;
+    }
+
     private static boolean applies(Anchor anchor, Column column) {
+        if (!column.dimension().equals(anchor.level().dimension())) return false;
         var position = new ChunkPos(column.position());
-        return column.dimension().equals(anchor.level().dimension()) && anchor.distance(position) != Long.MAX_VALUE
-                && anchor.level().getWorldBorder().isWithinBounds(position);
+        return anchor.distance(position) != Long.MAX_VALUE && anchor.level().getWorldBorder().isWithinBounds(position);
     }
 
     private static Anchor spawnAnchor(ServerLevel level, int radius, ServerVoxyConfig config, boolean online) {
