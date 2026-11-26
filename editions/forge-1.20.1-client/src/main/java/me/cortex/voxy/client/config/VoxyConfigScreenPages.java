@@ -205,6 +205,16 @@ public abstract class VoxyConfigScreenPages {
                         .setImpact(OptionImpact.HIGH)
                         .build())
                 .add(OptionImpl.createBuilder(int.class, storage)
+                        .setName(Component.translatable("voxy.config.rendering.meshJobsPerSecond"))
+                        .setTooltip(Component.translatable("voxy.config.rendering.meshJobsPerSecond.tooltip"))
+                        .setControl(option -> new SliderControl(option, 0, VoxyConfig.MAX_MESH_JOBS_PER_SECOND, 5,
+                                value -> value == 0
+                                        ? Component.translatable("voxy.config.rendering.meshJobsPerSecond.unlimited")
+                                        : Component.translatable("voxy.config.rendering.meshJobsPerSecond.rate", value)))
+                        .setBinding((s, value) -> s.meshJobsPerSecond = value, s -> s.meshJobsPerSecond)
+                        .setImpact(OptionImpact.HIGH)
+                        .build())
+                .add(OptionImpl.createBuilder(int.class, storage)
                         .setName(Component.translatable("voxy.config.general.leafLodMode"))
                         .setTooltip(Component.translatable("voxy.config.general.leafLodMode.tooltip"))
                         .setControl(option -> new SliderControl(option, 0, 2, 1,

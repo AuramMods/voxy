@@ -49,6 +49,11 @@ public abstract class MixinLevelRenderer implements IGetVoxyRenderSystem {
         }
     }
 
+    @Inject(method = "renderLevel", at = @At("RETURN"))
+    private void voxy$startMeshBuildGracePeriod(CallbackInfo ci) {
+        if (this.renderer != null) this.renderer.frameRendered();
+    }
+
     @Inject(method = "close", at = @At("HEAD"), remap = false)
     private void voxy$injectClose(CallbackInfo ci) {
         this.voxy$shutdownRenderer();

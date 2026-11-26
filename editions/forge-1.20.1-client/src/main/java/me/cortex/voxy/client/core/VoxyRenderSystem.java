@@ -8,6 +8,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 
 import me.cortex.voxy.client.TimingStatistics;
 import me.cortex.voxy.client.VoxyClient;
+import me.cortex.voxy.client.compat.DynamicFpsCompat;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.client.core.gl.GlBuffer;
@@ -565,6 +566,20 @@ public class VoxyRenderSystem {
 
     public int getQueuedMeshJobs() {
         return this.renderGen.getTaskCount();
+    }
+
+    public void updateMeshJobLimit() {
+        var client = Minecraft.getInstance();
+        this.renderGen.updateMeshJobLimit(VoxyConfig.CONFIG.meshJobsPerSecond,
+                DynamicFpsCompat.isIdleLimited(client.options.framerateLimit().get()));
+    }
+
+    public void restartMeshBuildGracePeriod() {
+        this.renderGen.restartGracePeriod();
+    }
+
+    public void frameRendered() {
+        this.renderGen.frameRendered();
     }
 
     public void addDebugInfo(List<String> debug) {

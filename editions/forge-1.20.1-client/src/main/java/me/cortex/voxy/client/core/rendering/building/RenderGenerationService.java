@@ -3,6 +3,7 @@ package me.cortex.voxy.client.core.rendering.building;
 import me.cortex.voxy.common.util.ExceptionCleanup;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.model.IdNotYetComputedException;
 import me.cortex.voxy.client.core.model.ModelBakerySubsystem;
 import me.cortex.voxy.common.thread.Service;
@@ -63,6 +64,7 @@ public class RenderGenerationService {
     private final boolean emitMeshlets;
 
     private final Service service;
+    private final MeshJobScheduler scheduler;
 
 
     /*
@@ -83,6 +85,19 @@ public class RenderGenerationService {
                 this.processJob(factory, seenMissed);
             }, factory::free);
         }, 10, "Section mesh generation service");
+        this.scheduler = new MeshJobScheduler(this.service::execute, VoxyConfig.CONFIG.meshJobsPerSecond);
+    }
+
+    public void updateMeshJobLimit(int jobsPerSecond, boolean idle) {
+        this.scheduler.updateLimit(jobsPerSecond, idle);
+    }
+
+    public void restartGracePeriod() {
+        this.scheduler.restartGracePeriod();
+    }
+
+    public void frameRendered() {
+        this.scheduler.frameRendered();
     }
 
     public void setResultConsumer(Consumer<BuiltSection> consumer) {
@@ -133,6 +148,7 @@ public class RenderGenerationService {
     private void processJob(RenderDataFactory factory, IntOpenHashSet seenMissedIds) {
         BuildTask task = this.taskQueue.poll();
         this.taskQueueCount.decrementAndGet();
+        this.scheduler.jobStarted();
 
         //long time = BuiltSection.getTime();
         boolean shouldFreeSection = true;
@@ -252,13 +268,7 @@ public class RenderGenerationService {
                     shouldFreeSection = false;
                 }
 
-                task.updatePriority();
-                this.taskQueue.add(task);
-                this.taskQueueCount.incrementAndGet();
-
-                if (this.service.isLive()) {//Only execute if were not dead
-                    this.service.execute();//Since we put in queue, release permit
-                }
+                this.queueTask(task);
             }
         }
 
@@ -294,12 +304,15 @@ public class RenderGenerationService {
         this.taskMapLock.unlockWrite(stamp);
 
         if (isOurs[0]) {//If its not ours we dont care about it
-            //Set priority and insert into queue and execute
-            task.updatePriority();
-            this.taskQueue.add(task);
-            this.taskQueueCount.incrementAndGet();
-            this.service.execute();
+            this.queueTask(task);
         }
+    }
+
+    private void queueTask(BuildTask task) {
+        task.updatePriority();
+        this.taskQueueCount.incrementAndGet();
+        this.taskQueue.add(task);
+        this.scheduler.enqueue();
     }
 
     /*
@@ -310,6 +323,7 @@ public class RenderGenerationService {
 
     public void shutdown() {
         var cleanup = new ExceptionCleanup(null);
+        this.scheduler.close();
         // 先停止调度并等待在途任务，剩余队列只需清理一遍。
         cleanup.run(this.service::shutdown);
         long stamp = this.taskMapLock.writeLock();

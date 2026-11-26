@@ -20,7 +20,10 @@ public class MixinIris {
     private static void voxy$recreateRendererAfterReload(CallbackInfo ci) {
         var minecraft = Minecraft.getInstance();
         if (minecraft.level != null) {
-            ((IGetVoxyRenderSystem) minecraft.levelRenderer).voxy$createRenderer();
+            var holder = (IGetVoxyRenderSystem) minecraft.levelRenderer;
+            holder.voxy$createRenderer();
+            var renderer = holder.voxy$getRenderSystem();
+            if (renderer != null) renderer.restartMeshBuildGracePeriod();
         }
     }
 
