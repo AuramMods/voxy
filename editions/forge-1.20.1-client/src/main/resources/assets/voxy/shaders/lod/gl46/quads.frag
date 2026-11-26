@@ -312,20 +312,30 @@ void main() {
     vec2 baseUV = getBaseUV();
     vec2 dx = dFdx(uv) * faceSize;
     vec2 dy = dFdy(uv) * faceSize;
-    float lod = 0.5 * log2(max(1.0, max(dot(dx, dx), dot(dy, dy))));
-    lod = min(lod, log2(faceSize));
 
     #ifdef TRANSLUCENT
     if ((interData.x & (1u << 7u)) != 0u && getFace() != faceTowardViewer(getFace())) discard;
     #endif
 
-    // Keep both trilinear levels inside this face. Adjacent tiles are unrelated models.
-    float inset = 0.5 * exp2(ceil(lod)) / faceSize;
-    vec2 filteredUV = clamp(localUV, inset, 1.0 - inset);
     vec2 texPos = baseUV + clamp(localUV, 0.5 / faceSize, 1.0 - 0.5 / faceSize) * faceScale;
-    vec4 colour = clearTintMaskFromColour(textureLod(blockModelAtlas, baseUV + filteredUV * faceScale, lod));
-    if (useCoarseFluidProxy() && colour.a == 0.0f) {
-        colour = clearTintMaskFromColour(sampleBaseTexel(baseUV + 0.5 * faceScale));
+    #ifdef VOXY_SHADOW_PASS
+    // Only balanced leaf cutouts use filtered alpha when writing depth.
+    bool needsFilteredColour = useDiscard() && useBalancedLeafCutout();
+    #else
+    const bool needsFilteredColour = true;
+    #endif
+    float lod = 0.0;
+    vec4 colour = vec4(0.0);
+    if (needsFilteredColour) {
+        lod = 0.5 * log2(max(1.0, max(dot(dx, dx), dot(dy, dy))));
+        lod = min(lod, log2(faceSize));
+        // Keep both trilinear levels inside this face. Adjacent tiles are unrelated models.
+        float inset = 0.5 * exp2(ceil(lod)) / faceSize;
+        vec2 filteredUV = clamp(localUV, inset, 1.0 - inset);
+        colour = clearTintMaskFromColour(textureLod(blockModelAtlas, baseUV + filteredUV * faceScale, lod));
+        if (useCoarseFluidProxy() && colour.a == 0.0f) {
+            colour = clearTintMaskFromColour(sampleBaseTexel(baseUV + 0.5 * faceScale));
+        }
     }
 
     //If we are in shaders and are a helper invocation, just exit, as it enables extra performance gains for small sized
@@ -351,6 +361,7 @@ void main() {
 
     #ifdef VOXY_SHADOW_PASS
     if (nearSectionState() != 0) discard;
+    if (!useDiscard()) return;
     #else
     #ifdef TRANSLUCENT
     // Glass has no near opaque depth and may be the only mesh in its section.
