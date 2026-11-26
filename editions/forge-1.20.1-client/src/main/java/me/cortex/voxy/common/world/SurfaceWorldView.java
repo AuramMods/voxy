@@ -152,7 +152,8 @@ public final class SurfaceWorldView implements AutoCloseable {
             return false;
         }
         long[] data = dense(section);
-        boolean resolve = section.lvl != 0 && section.getSurfaceData().mode() != 0;
+        var coverage = section.getSurfaceData();
+        boolean resolve = section.lvl != 0 && coverage.mode() != 0;
         if (data == null && !resolve) {
             Arrays.fill(output, offset, offset + 1024, raw(section, 0));
             return true;
@@ -164,7 +165,11 @@ public final class SurfaceWorldView implements AutoCloseable {
             int z = dz == 0 ? dx == 0 ? vertical : horizontal : dz < 0 ? 31 : 0;
             int index = x | (z << 5) | (y << 10);
             long value = data == null ? raw(section, index) : data[index];
-            output[offset + i] = resolve ? this.resolve(section, index, value) : value;
+            if (resolve && value == Mapper.AIR && coverage.isUncoveredVoxel(index)) {
+                output[offset + i] = missing;
+            } else {
+                output[offset + i] = resolve && value != Mapper.AIR ? this.resolve(section, index, value) : value;
+            }
         }
         return true;
     }

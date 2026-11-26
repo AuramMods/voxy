@@ -85,6 +85,11 @@ public final class SurfaceDataCoverage {
         return ((long) WORD.getAcquire(this.known, tile >>> 6) & (1L << (tile & 63))) != 0;
     }
 
+    public boolean isUncoveredVoxel(int index) {
+        // Legacy tiles do not tell us whether an air sample is missing.
+        return this.known != null && !this.isKnownVoxel(index);
+    }
+
     public int serializedWordCount() {
         return this.known == null ? 0 : this.known.length;
     }

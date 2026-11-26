@@ -40,6 +40,7 @@ import static org.lwjgl.opengl.GL15.GL_ELEMENT_ARRAY_BUFFER;
 import static org.lwjgl.opengl.GL15.glBindBuffer;
 import static org.lwjgl.opengl.GL30.glBindBufferBase;
 import static org.lwjgl.opengl.GL30.glBindVertexArray;
+import static org.lwjgl.opengl.GL30.glClearBufferiv;
 import static org.lwjgl.opengl.GL31.GL_UNIFORM_BUFFER;
 import static org.lwjgl.opengl.GL33.glBindSampler;
 import static org.lwjgl.opengl.GL40C.GL_DRAW_INDIRECT_BUFFER;
@@ -59,6 +60,8 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
     private static final int TRANSLUCENT_OFFSET = OPAQUE_DRAW_COUNT;
     private static final int TEMPORAL_OFFSET = TRANSLUCENT_OFFSET + TRANSLUCENT_DRAW_COUNT;
     private static final int STATISTICS_BUFFER_BINDING = 8;
+    private static final int OPAQUE_COVERAGE_BIT = 4;
+    private static final int[] CLEAR_STENCIL = {0};
     private final Shader terrainShader;
     private final Shader shadowShader;
     private final Shader translucentTerrainShader;
@@ -239,7 +242,8 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glBindBuffer(GL_PARAMETER_BUFFER_ARB, viewport.drawCountCallBuffer.id);
     }
 
-    private void renderTerrain(MDICViewport viewport, long indirectOffset, long drawCountOffset, int maxDrawCount) {
+    private void renderTerrain(MDICViewport viewport, long indirectOffset, long drawCountOffset, int maxDrawCount,
+                               boolean temporal) {
         //RenderLayer.getCutoutMipped().startDrawing();
 
 
@@ -250,6 +254,17 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         this.terrainShader.bind();
         glBindVertexArray(GlVertexArray.STATIC_VAO);//Needs to be before binding
         this.pipeline.setupAndBindOpaque(viewport);
+        boolean shaderTestsNearDepth = this.pipeline instanceof IrisVoxyRenderPipeline iris && iris.hasTerrainTransition();
+        int nearMask = shaderTestsNearDepth ? 0 : 1;
+        if (temporal) {
+            // Fill newly visible pixels without replacing part of the previous
+            // mesh on the same frame. The next frame draws the new selection.
+            glStencilFunc(GL_EQUAL, 1, nearMask | OPAQUE_COVERAGE_BIT);
+        } else {
+            glStencilMask(OPAQUE_COVERAGE_BIT);
+            glStencilFunc(GL_EQUAL, 1 | OPAQUE_COVERAGE_BIT, nearMask);
+            glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        }
         this.bindRenderingBuffers(viewport);
 
         glMemoryBarrier(GL_COMMAND_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);//Barrier everything is needed
@@ -259,6 +274,10 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         }
         glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT, indirectOffset, drawCountOffset, maxDrawCount, 0);
+        if (!temporal) {
+            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+            glStencilMask(0xFF);
+        }
         if (VoxyClient.getOcclusionDebugState()==3) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
@@ -281,7 +300,8 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
 
         this.uploadUniformBuffer(viewport);
 
-        this.renderTerrain(viewport, 0, 4*3, Math.min((int)(this.geometryManager.getSectionCount()*4.4+128), OPAQUE_DRAW_COUNT));
+        this.renderTerrain(viewport, 0, 4*3,
+                Math.min((int)(this.geometryManager.getSectionCount()*4.4+128), OPAQUE_DRAW_COUNT), false);
     }
 
     @Override
@@ -451,9 +471,15 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
 
     @Override
     public void renderTemporal(MDICViewport viewport) {
-        if (this.geometryManager.getSectionCount() == 0) return;
-        //Render temporal
-        this.renderTerrain(viewport, TEMPORAL_OFFSET*5*4, 4*5, Math.min(this.geometryManager.getSectionCount(), TEMPORAL_DRAW_COUNT));
+        if (this.geometryManager.getSectionCount() != 0) {
+            this.renderTerrain(viewport, TEMPORAL_OFFSET*5*4, 4*5,
+                    Math.min(this.geometryManager.getSectionCount(), TEMPORAL_DRAW_COUNT), true);
+        }
+        // Keep the near-terrain stencil intact for translucent terrain and other renderers.
+        glStencilMask(OPAQUE_COVERAGE_BIT);
+        glClearBufferiv(GL_STENCIL, 0, CLEAR_STENCIL);
+        glStencilMask(0xFF);
+        glStencilFunc(GL_EQUAL, 1, 0xFF);
     }
 
     @Override

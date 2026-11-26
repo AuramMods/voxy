@@ -38,6 +38,9 @@ public class RenderDataFactory {
     //private final long[] sectionData = new long[32*32*32*2];
     private final long[] sectionData = new long[32*32*32*2];
     private final long[] neighboringFaces = new long[32*32*6];
+    // Mesh input marker. It has neither a block ID nor any stored light.
+    static final long UNKNOWN_AIR = 1L << 21;
+    private long[] rawSectionData;
     //private final int[] neighboringOpaqueMasks = new int[32*6];
 
     private final int[] opaqueMasks = new int[32*32];
@@ -382,9 +385,11 @@ public class RenderDataFactory {
         }
     }
 
-    private int prepareSectionData(final long[] rawSectionData) {
+    private int prepareSectionData(WorldSection section) {
         final var sectionData = this.sectionData;
         final var rawModelIds = this.modelMan._unsafeRawAccess();
+        final var coverage = section.getSurfaceData();
+        final boolean partialLod = section.lvl != 0 && coverage.mode() == 2;
         long opaque = 0;
         long notEmpty = 0;
         long pureFluid = 0;
@@ -394,10 +399,11 @@ public class RenderDataFactory {
         int i = 0;
         for (int q = 0; q < 512; q++) {
             for (int j = 0; j < 64; i++, j++) {
-                long block = rawSectionData[i];//Get the block mapping
+                long block = this.rawSectionData[i];//Get the block mapping
                 this.biomeIds[i] = (short) Mapper.getBiomeId(block);
                 if (Mapper.isAir(block)) {//If it is air, just emit lighting
-                    sectionData[i * 2] = (block & (0xFFL << 56)) >>> 1;
+                    sectionData[i * 2] = partialLod && block == Mapper.AIR && coverage.isUncoveredVoxel(i)
+                            ? UNKNOWN_AIR : (block & (0xFFL << 56)) >>> 1;
                     sectionData[i * 2 + 1] = 0;
                 } else {
                     int modelId = rawModelIds[Mapper.getBlockId(block)];
@@ -461,19 +467,34 @@ public class RenderDataFactory {
     }
 
     private void acquireNeighborData(WorldSection section, int msk) {
-        int unavailable = 0;
+        long missing = section.lvl == 0 ? Mapper.AIR : UNKNOWN_AIR;
         for (int face = 0; face < 6; face++) {
             if ((msk & (1 << face)) == 0) continue;
-            long missing = 0L;
-            if (!this.surfaceView.copyFace(face, this.neighboringFaces, face * 1024, missing)) {
-                unavailable |= 1 << face;
-            }
+            this.surfaceView.copyFace(face, this.neighboringFaces, face * 1024, missing);
         }
-
     }
 
     // ---- 流体描述和形状编码 -------------------------------------------
     private static final long LM = (0xFFL << 55);
+
+    static long opaqueFaceLight(long neighbor, long[] voxels, int blockIndex) {
+        if ((neighbor & UNKNOWN_AIR) == 0) return neighbor & LM;
+
+        // An unfinished edge borrows skylight from its loaded column. Limit the
+        // search so the estimate stays local, including beneath overhangs.
+        int skylight = Mapper.getLightId(voxels[blockIndex]) & 15;
+        for (int dy = 1; dy <= 4 && skylight < 14; dy++) {
+            int above = blockIndex + (dy << 10);
+            if (above >= voxels.length) break;
+            skylight = Math.max(skylight, (Mapper.getLightId(voxels[above]) & 15) - dy);
+        }
+        return (long) skylight << 55;
+    }
+
+    private long outerOpaqueFaceLight(long neighbor, int blockIndex) {
+        long light = (neighbor & (0xFFL << 56)) >>> 1;
+        return opaqueFaceLight(light | (neighbor & UNKNOWN_AIR), this.rawSectionData, blockIndex);
+    }
 
     private int fluidModelId(int voxelIndex) {
         long quad = this.sectionData[voxelIndex * 2];
@@ -712,7 +733,7 @@ public class RenderDataFactory {
                             applyQuadLight(
                                 ((long) facingForward) |//Facing
                                 (selfModel&~LM) |
-                                (nextModel&LM),//Apply lighting
+                                opaqueFaceLight(nextModel, this.rawSectionData, iA >> 1),
                                 selfMeta
                             ));
                     }
@@ -785,7 +806,7 @@ public class RenderDataFactory {
                         this.blockMesher.putNext(applyQuadLight(
                                 ((side == 0) ? 0L : 1L) |
                                 (A&~LM) |
-                                ((neighborId & (0xFFL << 56)) >>> 1),
+                                outerOpaqueFaceLight(neighborId, idx),
                                 selfMeta
                                 )
                         );
@@ -1277,7 +1298,7 @@ public class RenderDataFactory {
                         mesher.putNext(applyQuadLight(
                                 ((long) facingForward) |//Facing
                                 (selfModel&~LM) |
-                                (nextModel&LM),//TODO FIX THIS (self lighting)
+                                opaqueFaceLight(nextModel, this.rawSectionData, iA >> 1),
                                 selfMeta
                                 )
                         );
@@ -1344,7 +1365,7 @@ public class RenderDataFactory {
                         ma.putNext(applyQuadLight(
                                 0L |
                                 (A&~LM) |
-                                ((neighborId&(0xFFL<<56))>>>1),
+                                outerOpaqueFaceLight(neighborId, i << 5),
                                 Am
                                 )
                         );
@@ -1370,7 +1391,7 @@ public class RenderDataFactory {
                         mb.putNext(applyQuadLight(
                                 1L |
                                 (A&~LM) |
-                                ((neighborId&(0xFFL<<56))>>>1),
+                                outerOpaqueFaceLight(neighborId, (i << 5) + 31),
                                 Am
                                 )
                         );
@@ -2240,6 +2261,8 @@ public class RenderDataFactory {
     public BuiltSection generateMesh(WorldSection section) {
         try (var view = this.surfaceView.open(this.world, section)) {
             return this.generateMeshWithView(section);
+        } finally {
+            this.rawSectionData = null;
         }
     }
 
@@ -2289,8 +2312,8 @@ public class RenderDataFactory {
         Arrays.fill(this.fluidMasks, 0);
 
         //Prepare everything
-        long[] rawSection = this.surfaceView.sectionData();
-        int neighborMskAndFlags = this.prepareSectionData(rawSection);
+        this.rawSectionData = this.surfaceView.sectionData();
+        int neighborMskAndFlags = this.prepareSectionData(section);
         if ((neighborMskAndFlags&(1<<31))!=0) {//We failed to get everything so throw exception
             throw new IdNotYetComputedException(neighborMskAndFlags&((1<<20)-1), true);
         }
@@ -2313,7 +2336,7 @@ public class RenderDataFactory {
                 if (!blend) blendRadius = 0;
             }
             if (fluidHalo || blendRadius != 0) prepareHorizontalHalo(section, fluidHalo, Math.max(fluidHalo ? 1 : 0, blendRadius));
-            this.applyBiomeBlend(rawSection);
+            this.applyBiomeBlend(this.rawSectionData);
             this.generateYZFaces();
             this.generateXFaces();
             this.generateFluidFaces();
