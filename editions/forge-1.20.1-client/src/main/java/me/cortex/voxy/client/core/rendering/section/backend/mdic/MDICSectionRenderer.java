@@ -91,6 +91,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
             this.commandGenShader = Shader.make()
                     .define("TRANSLUCENT_WRITE_BASE", TRANSLUCENT_DISTANCE_BUCKETS)
                     .define("TEMPORAL_OFFSET", TEMPORAL_OFFSET)
+                    .define("SHARED_INDEX_QUAD_CAPACITY", SharedIndexBuffer.QUAD_INDEX_CAPACITY)
 
                     .define("TRANSLUCENT_DISTANCE_BUFFER_BINDING", 7)
 

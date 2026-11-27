@@ -83,6 +83,22 @@ void main() {
         positionBuffer[drawId] = extractRawPos(meta);
         uvec4 counts = meta.b;
 
+        if (shadowPass) {
+            // All seven opaque buckets share one contiguous span and position.
+            uvec4 high = counts >> 16u;
+            uvec4 low = counts & 0xffffu;
+            uint quads = high.x + high.y + high.z + high.w + low.y + low.z + low.w;
+            if (quads <= SHARED_INDEX_QUAD_CAPACITY) {
+                if (quads != 0u) {
+                    writeCmd(atomicAdd(opaqueDrawCount, 1u), drawId, ptr + low.x, quads);
+                }
+                #ifdef HAS_STATISTICS
+                atomicAdd(quadCounts[detail], quads);
+                #endif
+                return;
+            }
+        }
+
         //TODO implicit command merging
         uint msk = 0;
         msk |= uint(((counts.y      &0xFFFFu)!=0) && (shadowPass || relative.y>-1))<<0;
