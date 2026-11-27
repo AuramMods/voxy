@@ -8,6 +8,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 
 import me.cortex.voxy.client.TimingStatistics;
 import me.cortex.voxy.client.VoxyClient;
+import me.cortex.voxy.client.compat.MenuTerrainVisibility;
 import me.cortex.voxy.client.compat.DynamicFpsCompat;
 import me.cortex.voxy.client.compat.JustZoomCompat;
 import me.cortex.voxy.client.core.rendering.SectionUpdateRouter;
@@ -291,7 +292,7 @@ public class VoxyRenderSystem {
     public void renderShadowCasters(Matrix4fc projection, Matrix4fc modelView, double cameraX, double cameraY,
                                     double cameraZ, float shadowDistance, int depthTexture, int resolution) {
         if (this.shadowTerrainCoverage == null) return;
-        if (visionEffectPresent()) return;
+        if (MenuTerrainVisibility.isHidden() || visionEffectPresent()) return;
         if (!(this.pipeline.sectionRenderer instanceof MDICSectionRenderer renderer)) return;
 
         ShadowRenderState.run(() -> {

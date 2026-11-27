@@ -5,6 +5,7 @@ import me.cortex.voxy.common.util.ExceptionCleanup;
 import me.cortex.voxy.client.RenderStatistics;
 import me.cortex.voxy.client.TimingStatistics;
 import me.cortex.voxy.client.VoxyClient;
+import me.cortex.voxy.client.compat.MenuTerrainVisibility;
 import me.cortex.voxy.client.compat.distant.DistantBlockShader;
 import me.cortex.voxy.client.core.model.ModelBakerySubsystem;
 import me.cortex.voxy.client.core.rendering.Viewport;
@@ -111,8 +112,11 @@ public abstract class AbstractRenderPipeline extends TrackedObject {
         int depthTexture = this.setup(viewport, sourceFrameBuffer, srcWidth, srcHeight);
 
         var rs = ((AbstractSectionRenderer)this.sectionRenderer);
-        GPUTiming.INSTANCE.marker("RO");
-        rs.renderOpaque(viewport);
+        boolean drawTerrain = !MenuTerrainVisibility.isHidden();
+        if (drawTerrain) {
+            GPUTiming.INSTANCE.marker("RO");
+            rs.renderOpaque(viewport);
+        }
         var occlusionDebug = VoxyClient.getOcclusionDebugState();
         if (occlusionDebug==0) {
             GPUTiming.INSTANCE.marker("I");
@@ -126,18 +130,20 @@ public abstract class AbstractRenderPipeline extends TrackedObject {
             TimingStatistics.G.stop();
         }
 
-        GPUTiming.INSTANCE.marker("TP");
-        rs.renderTemporal(viewport);
-
-        rs.postOpaquePreperation(viewport);
-
-        me.cortex.voxy.client.compat.LodPipelineHooks.beforeTranslucent(
-                this, viewport, this.properties.closerEqualDepthCompare());
+        // Keep traversal, uploads, depth setup, and indirect commands current while
+        // the menu is opaque. The next visible frame can draw the resident meshes.
+        if (drawTerrain) {
+            GPUTiming.INSTANCE.marker("TP");
+            rs.renderTemporal(viewport);
+            rs.postOpaquePreperation(viewport);
+            me.cortex.voxy.client.compat.LodPipelineHooks.beforeTranslucent(
+                    this, viewport, this.properties.closerEqualDepthCompare());
+        }
 
         this.postOpaquePreTranslucent(viewport, sourceFrameBuffer);
-        GPUTiming.INSTANCE.marker("RT");
 
-        if (!this.deferTranslucency) {
+        if (drawTerrain && !this.deferTranslucency) {
+            GPUTiming.INSTANCE.marker("RT");
             rs.renderTranslucent(viewport);
         }
         GPUTiming.INSTANCE.marker();
