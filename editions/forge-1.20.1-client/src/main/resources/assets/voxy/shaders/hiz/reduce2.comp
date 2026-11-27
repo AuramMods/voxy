@@ -1,0 +1,43 @@
+#version 450 core
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D source;
+layout(binding = 1, r32f) writeonly uniform image2D firstMip;
+layout(binding = 2, r32f) writeonly uniform image2D secondMip;
+layout(binding = 3, r32f) writeonly uniform image2D baseMip;
+layout(location = 0) uniform int sourceLevel;
+layout(location = 1) uniform bool reverseDepth;
+layout(location = 2) uniform bool hasSecondMip;
+shared float tile[8][8];
+
+float reduce(float a, float b) {
+    return reverseDepth ? min(a, b) : max(a, b);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 local = ivec2(gl_LocalInvocationID.xy);
+    ivec2 last = textureSize(source, sourceLevel) - 1;
+    ivec2 start = pixel * 2;
+    float a = texelFetch(source, min(start, last), sourceLevel).x;
+    float b = texelFetch(source, min(start + ivec2(1,0), last), sourceLevel).x;
+    float c = texelFetch(source, min(start + ivec2(0,1), last), sourceLevel).x;
+    float d = texelFetch(source, min(start + ivec2(1,1), last), sourceLevel).x;
+    if (sourceLevel == 0) {
+        // Preserve the depth values sampled from the raster seed.
+        if (all(lessThanEqual(start, last))) imageStore(baseMip, start, vec4(a));
+        if (all(lessThanEqual(start + ivec2(1,0), last))) imageStore(baseMip, start + ivec2(1,0), vec4(b));
+        if (all(lessThanEqual(start + ivec2(0,1), last))) imageStore(baseMip, start + ivec2(0,1), vec4(c));
+        if (all(lessThanEqual(start + ivec2(1,1), last))) imageStore(baseMip, start + ivec2(1,1), vec4(d));
+    }
+    float depth = reduce(reduce(a, b), reduce(c, d));
+    tile[local.y][local.x] = depth;
+    if (all(lessThan(pixel, imageSize(firstMip)))) imageStore(firstMip, pixel, vec4(depth));
+    barrier();
+    if (hasSecondMip && (local.x & 1) == 0 && (local.y & 1) == 0 &&
+            all(lessThan(pixel / 2, imageSize(secondMip)))) {
+        float bottom = reduce(depth, tile[local.y][local.x + 1]);
+        float top = reduce(tile[local.y + 1][local.x], tile[local.y + 1][local.x + 1]);
+        imageStore(secondMip, pixel / 2, vec4(reduce(bottom, top)));
+    }
+}
