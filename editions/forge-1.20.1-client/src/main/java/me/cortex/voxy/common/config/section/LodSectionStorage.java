@@ -108,6 +108,23 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
         }
     }
 
+    public record ColumnRange(long first, long last) {}
+
+    /** Counts completed columns in disjoint, inclusive ranges of packed chunk keys. */
+    public synchronized long countCompletedColumns(Collection<ColumnRange> ranges) throws SQLException {
+        long count = 0;
+        try (var query = this.db.prepareStatement("SELECT COUNT(*) FROM completed_columns WHERE id BETWEEN ? AND ?")) {
+            for (var range : ranges) {
+                query.setLong(1, range.first());
+                query.setLong(2, range.last());
+                try (var result = query.executeQuery()) {
+                    if (result.next()) count += result.getLong(1);
+                }
+            }
+        }
+        return count;
+    }
+
     public record RemoteTile(UUID session, TileVersion version, byte children) {
         public boolean needs(UUID session, TileVersion offered) {
             return offered.content() != this.version.content()

@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -524,6 +525,17 @@ final class ServerLodGenerator {
         this.generated = 0;
         this.workedDimensions.clear();
         return result;
+    }
+
+    Map<ResourceKey<Level>, GenerationCoverage.Target> generationTargets() {
+        if (!this.generationOn) return Map.of();
+        var targets = new LinkedHashMap<ResourceKey<Level>, GenerationCoverage.Target>();
+        for (var anchor : this.previousEligible) {
+            var target = targets.computeIfAbsent(anchor.level().dimension(), key ->
+                    new GenerationCoverage.Target(GenerationCoverage.Bounds.of(anchor.level().getWorldBorder()), new ArrayList<>()));
+            target.areas().add(new GenerationCoverage.Area(anchor.center(), anchor.radius()));
+        }
+        return targets;
     }
 
     void close() {

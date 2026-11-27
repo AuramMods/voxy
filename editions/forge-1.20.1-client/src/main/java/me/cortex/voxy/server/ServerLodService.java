@@ -28,9 +28,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.util.Locale;
 import java.util.Map;
+import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -56,6 +59,7 @@ public final class ServerLodService implements AutoCloseable {
     private final ServerLodGenerator generator;
     private final ServerLodEdits edits;
     private final ServerLodStreams streams;
+    private CompletableFuture<Void> coverageReport;
     private long lastReport = System.nanoTime();
 
     private ServerLodService(MinecraftServer server) throws IOException {
@@ -250,12 +254,7 @@ public final class ServerLodService implements AutoCloseable {
         long now = System.nanoTime();
         long elapsed = now - service.lastReport;
         if (elapsed >= TimeUnit.SECONDS.toNanos(60)) {
-            var progress = service.generator.report();
-            double perSecond = (progress.generated() + progress.imported()) * 1_000_000_000.0 / elapsed;
-            Logger.info(String.format(java.util.Locale.ROOT,
-                    "Voxy LODs %.2f chunks/s (%d generated, %d reused), generating %s, %d active tickets",
-                    perSecond, progress.generated(), progress.imported(),
-                    progress.generating().isEmpty() ? "idle" : progress.generating(), progress.tickets()));
+            service.reportProgress(elapsed);
             if (REPORT_SECTION_CACHE) {
                 service.worlds.forEach((key, dimension) ->
                         Logger.info("Section cache server", key.location(), dimension.world().sectionCacheStats()));
@@ -266,6 +265,44 @@ public final class ServerLodService implements AutoCloseable {
             }
             service.lastReport = now;
         }
+    }
+
+    private void reportProgress(long elapsed) {
+        var progress = this.generator.report();
+        double perSecond = (progress.generated() + progress.imported()) * 1_000_000_000.0 / elapsed;
+        String status = String.format(Locale.ROOT,
+                "Voxy LODs %,.2f chunks/s (%,d generated, %,d reused), generating %s, %,d active tickets",
+                perSecond, progress.generated(), progress.imported(),
+                progress.generating().isEmpty() ? "idle" : progress.generating(), progress.tickets());
+        var targets = this.generator.generationTargets();
+        if (targets.isEmpty()) {
+            Logger.info(status);
+        } else if (this.coverageReport != null && !this.coverageReport.isDone()) {
+            Logger.info(status + " | coverage estimate pending");
+        } else {
+            this.coverageReport = CompletableFuture.runAsync(() -> Logger.info(status + this.formatCoverage(targets)), this.worker);
+        }
+    }
+
+    private String formatCoverage(Map<ResourceKey<Level>, GenerationCoverage.Target> targets) {
+        var dimensions = new StringJoiner(", ", "[", "]");
+        var total = new GenerationCoverage.Count(0, 0, false);
+        boolean allAvailable = true;
+        for (var entry : targets.entrySet()) {
+            var key = entry.getKey();
+            var target = entry.getValue();
+            try {
+                var count = GenerationCoverage.read(this.storagePath(key), target.bounds(), target.areas());
+                dimensions.add(key.location() + " " + count.format());
+                total = total.plus(count);
+            } catch (SQLException | RuntimeException failure) {
+                Logger.warn("Could not read Voxy generation coverage for " + key.location(), failure);
+                dimensions.add(key.location() + " unavailable");
+                allAvailable = false;
+            }
+        }
+        String combined = targets.size() > 1 && allAvailable ? "total " + total.format() + " " : "";
+        return " | coverage " + combined + dimensions;
     }
 
     private void resizeWorkers(int jobs) {
