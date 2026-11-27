@@ -37,6 +37,7 @@ public class Capabilities {
     public final long ssboMaxSize;
     public final int ssboBindingAlignment;
     public final boolean isMesa;
+    public final boolean isGla;
     public final boolean canQueryGpuMemory;
     public final long totalDedicatedMemory;//Bytes, dedicated memory
     public final long totalDynamicMemory;//Bytes, total allocation memory - dedicated memory
@@ -85,7 +86,9 @@ public class Capabilities {
         this.ssboMaxSize = glGetInteger64(GL_MAX_SHADER_STORAGE_BLOCK_SIZE);
         this.ssboBindingAlignment = glGetInteger(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT);
 
-        this.isMesa = glGetString(GL_VERSION).toLowerCase(Locale.ROOT).contains("mesa");
+        var version = glGetString(GL_VERSION).toLowerCase(Locale.ROOT);
+        this.isMesa = version.contains("mesa");
+        this.isGla = version.contains("(gla ");
         var vendor = glGetString(GL_VENDOR).toLowerCase(Locale.ROOT);
         this.isIntel = vendor.contains("intel");
         this.isNvidia = vendor.contains("nvidia");

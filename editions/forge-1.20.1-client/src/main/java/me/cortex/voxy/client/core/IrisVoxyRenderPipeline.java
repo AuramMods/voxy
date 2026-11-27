@@ -1,5 +1,6 @@
 package me.cortex.voxy.client.core;
 
+import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.common.util.ExceptionCleanup;
 
 import me.cortex.voxy.client.core.gl.GlBuffer;
@@ -21,8 +22,12 @@ import java.util.List;
 import java.util.function.BooleanSupplier;
 
 import static org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT;
+import static org.lwjgl.opengl.GL11C.GL_SCISSOR_TEST;
+import static org.lwjgl.opengl.GL11C.GL_TEXTURE_2D;
+import static org.lwjgl.opengl.GL11C.glIsEnabled;
 import static org.lwjgl.opengl.GL30C.*;
 import static org.lwjgl.opengl.GL31.GL_UNIFORM_BUFFER;
+import static org.lwjgl.opengl.GL43C.glCopyImageSubData;
 import static org.lwjgl.opengl.GL45C.*;
 
 public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
@@ -166,18 +171,20 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
         }
 
         glTextureBarrier();
+        this.copyDepthStencil(viewport);
+    }
 
-        int msk = GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT;
-        if (true) {//TODO: make shader specified
-            if (false) {//TODO: only do this if shader specifies
-                glBindFramebuffer(GL_FRAMEBUFFER, this.fbTranslucent.framebuffer.id);
-                glClearColor(0, 0, 0, 0);
-                glClear(GL_COLOR_BUFFER_BIT);
-            }
+    private void copyDepthStencil(Viewport<?> viewport) {
+        if (Capabilities.INSTANCE.isGla && !glIsEnabled(GL_SCISSOR_TEST)) {
+            // Both framebuffer attachments have the same format and were resized together.
+            glCopyImageSubData(this.fb.getDepthTex().id, GL_TEXTURE_2D, 0, 0, 0, 0,
+                    this.fbTranslucent.getDepthTex().id, GL_TEXTURE_2D, 0, 0, 0, 0,
+                    viewport.width, viewport.height, 1);
         } else {
-            msk |= GL_COLOR_BUFFER_BIT;
+            glBlitNamedFramebuffer(this.fb.framebuffer.id, this.fbTranslucent.framebuffer.id,
+                    0, 0, viewport.width, viewport.height, 0, 0, viewport.width, viewport.height,
+                    GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
         }
-        glBlitNamedFramebuffer(this.fb.framebuffer.id, this.fbTranslucent.framebuffer.id, 0,0, viewport.width, viewport.height, 0,0, viewport.width, viewport.height, msk, GL_NEAREST);
     }
 
     @Override
