@@ -16,6 +16,7 @@ import static org.lwjgl.opengl.GL15C.glBindBuffer;
 import static org.lwjgl.opengl.GL21C.GL_PIXEL_UNPACK_BUFFER;
 import static org.lwjgl.opengl.GL21C.GL_PIXEL_UNPACK_BUFFER_BINDING;
 import static org.lwjgl.opengl.GL30C.*;
+import static org.lwjgl.opengl.GL43C.glCopyImageSubData;
 
 public final class GlaAtlasUploads {
     private static final int MAX_FRAME_TEXTURES = 2048;
@@ -104,7 +105,7 @@ public final class GlaAtlasUploads {
         }
         FrameKey key = frameSprite == null ? null : new FrameKey(frameSprite, frameIndex, level, width, height);
         Integer cached = key == null ? null : FRAME_TEXTURES.get(key);
-        // Cache hits can blit immediately. Group only uploads that need CPU pixel transfers.
+        // Cache hits can copy immediately. Group only uploads that need CPU pixel transfers.
         if (cached == null && !closesImage && pixels != 0 && width <= UploadBatch.SIZE && height <= UploadBatch.SIZE
                 && glGetInteger(GL_PIXEL_UNPACK_BUFFER_BINDING) == 0) {
             BATCH.add(level, x, y, width, height, pixels, imageWidth, skipX, skipY, key);
@@ -112,6 +113,13 @@ public final class GlaAtlasUploads {
         }
 
         BATCH.flush();
+        if (cached != null && atlasFormat == GL_RGBA8) {
+            glCopyImageSubData(cached, target, 0, 0, 0, 0,
+                    atlas, target, level, x, y, 0, width, height, 1);
+            reportGpuCopies();
+            return true;
+        }
+
         int previousRead = glGetInteger(GL_READ_FRAMEBUFFER_BINDING);
         int previousDraw = glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
         boolean scissored = glIsEnabled(GL_SCISSOR_TEST);
