@@ -88,7 +88,11 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
     public MDICSectionRenderer(AbstractRenderPipeline pipeline, ModelStore modelStore, BasicSectionGeometryData geometryData) {
         super(pipeline.properties, modelStore, geometryData);
         try {
-            this.commandGenShader = Shader.make()
+            String shadowPosition = pipeline instanceof IrisVoxyRenderPipeline iris ? iris.shadowPositionPatch() : null;
+            String shadowBoundsPatch = shadowPosition != null && shadowPosition.contains("vec4 voxyShadowBounds(")
+                    && shadowPosition.contains("float voxyShadowReceiverEdge(")
+                    ? shadowPosition : null;
+            var commandBuilder = Shader.make()
                     .define("TRANSLUCENT_WRITE_BASE", TRANSLUCENT_DISTANCE_BUCKETS)
                     .define("TEMPORAL_OFFSET", TEMPORAL_OFFSET)
                     .define("SHARED_INDEX_QUAD_CAPACITY", SharedIndexBuffer.QUAD_INDEX_CAPACITY)
@@ -98,8 +102,10 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
                     .defineIf("HAS_STATISTICS", RenderStatistics.enabled)
                     .defineIf("STATISTICS_BUFFER_BINDING", RenderStatistics.enabled, STATISTICS_BUFFER_BINDING)
 
-                    .add(ShaderType.COMPUTE, "voxy:lod/gl46/cmdgen.comp")
-                    .compile();
+                    .defineIf("VOXY_SHADOW_BOUNDS", shadowBoundsPatch != null);
+            var commandSource = ShaderLoader.parse("voxy:lod/gl46/cmdgen.comp");
+            this.commandGenShader = commandBuilder.addSource(ShaderType.COMPUTE,
+                    String shadowBoundsPatch == null ? commandSource : commandSource + "\n" + shadowBoundsPatch).compile();
             this.prepShader = Shader.make()
                     .define("TRANSLUCENT_DISTANCE_BUCKETS", TRANSLUCENT_DISTANCE_BUCKETS)
                     .add(ShaderType.COMPUTE, "voxy:lod/gl46/prep.comp")
@@ -125,11 +131,11 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
             //The pipeline can be used to transform the renderer in abstract ways
 
             String vertex = ShaderLoader.parse("voxy:lod/gl46/quads3.vert");
-            String shadowPosition = pipeline instanceof IrisVoxyRenderPipeline iris ? iris.shadowPositionPatch() : null;
             if (shadowPosition != null) {
                 var shadowBuilder = Shader.make()
                         .apply(this.properties::apply)
                         .define("VOXY_SHADOW_PASS")
+                        .defineIf("VOXY_SHADOW_BOUNDS", shadowBoundsPatch != null)
                         .addSource(ShaderType.VERTEX, vertex + "\n" + shadowPosition)
                         .add(ShaderType.FRAGMENT, "voxy:lod/gl46/quads.frag");
                 addDirectionalFaceTint(shadowBuilder, level);
@@ -227,6 +233,10 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         MemoryUtil.memPutFloat(ptr, far * far); ptr += 4;
         MemoryUtil.memPutFloat(ptr, 0); ptr += 4;
         MemoryUtil.memPutInt(ptr, !viewport.isShadowPass() && VoxyKeyBindings.isLodTintHeld() ? 1 : 0);
+        ptr += 16; // std140 aligns the next vector to 16 bytes.
+        if (viewport.isShadowPass()) {
+            me.cortex.voxy.client.core.rendering.ShadowReceiverFrustum.write(viewport, ptr);
+        }
         UploadStream.INSTANCE.commit();
     }
 

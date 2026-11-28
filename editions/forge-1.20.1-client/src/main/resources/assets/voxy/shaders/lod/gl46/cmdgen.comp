@@ -48,6 +48,33 @@ void writeCmd(uint idx, uint instance, uint offset, uint quadCount) {
     cmdBuffer[idx] = cmd;
 }
 
+#ifdef VOXY_SHADOW_BOUNDS
+vec4 voxyShadowBounds(vec4 bounds);
+float voxyShadowReceiverEdge(float edge);
+
+bool outsideShadowReceivers(SectionMeta meta, uint detail, ivec3 ipos) {
+    // The metadata encloses the occupied blocks. Include face insets and voxel overhang.
+    float blockScale = float(1u << detail);
+    vec3 size = (vec3(extractAABBSize(meta)) * 0.5 + 1.0) * blockScale;
+    vec3 origin = vec3(((ipos << detail) - baseSectionPos) << 5);
+    vec3 center = (MVP * vec4(origin + vec3(extractAABBOffset(meta)) * blockScale
+                              + size - blockScale, 1.0)).xyz;
+    vec3 radius = abs(MVP[0].xyz) * size.x + abs(MVP[1].xyz) * size.y + abs(MVP[2].xyz) * size.z;
+    vec3 lower = center - radius;
+    vec3 upper = center + radius;
+    vec4 projected = voxyShadowBounds(vec4(lower.xy, upper.xy));
+    if (any(greaterThan(projected.xy, vec2(1.0001))) || any(lessThan(projected.zw, vec2(-1.0001)))) return true;
+
+    for (int i = 0; i < 4; ++i) {
+        vec3 plane = shadowReceiverPlanes[i].xyz;
+        if (plane.xy == vec2(0.0)) continue;
+        vec2 support = mix(projected.xy, projected.zw, greaterThanEqual(plane.xy, vec2(0.0)));
+        if (dot(plane.xy, support) < voxyShadowReceiverEdge(plane.z)) return true;
+    }
+    return false;
+}
+#endif
+
 void main() {
     bool shadowPass = shadowSectionLimit != 0u;
     uint inputCount = shadowPass ? min(sectionCount, shadowSectionLimit) : sectionCount;
@@ -58,6 +85,9 @@ void main() {
     SectionMeta meta = sectionData[sectionId];
     uint detail = extractDetail(meta);
     ivec3 ipos = extractPosition(meta);
+    #ifdef VOXY_SHADOW_BOUNDS
+    if (shadowPass && worldCurveData.x == 0.0 && outsideShadowReceivers(meta, detail, ipos)) return;
+    #endif
 
     vec3 cornerPos = vec3(((ipos<<detail)-baseSectionPos)<<5)-cameraSubPos;
 

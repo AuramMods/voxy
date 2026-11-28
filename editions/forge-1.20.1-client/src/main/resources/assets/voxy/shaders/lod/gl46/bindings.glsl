@@ -11,6 +11,7 @@ layout(binding = 0, std140) uniform SceneUniform {
     vec4 worldCurveData;
     vec4 trackReplacement;
     uint lodDebugTint;
+    vec4 shadowReceiverPlanes[4];
 };
 
 //TODO: see if making the stride 2*4*4 bytes or something cause you get that 16 byte write
