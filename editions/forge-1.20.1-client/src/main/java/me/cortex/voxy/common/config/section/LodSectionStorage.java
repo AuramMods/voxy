@@ -7,11 +7,9 @@ import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import org.sqlite.SQLiteConfig;
 
-import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
@@ -22,6 +20,7 @@ import java.sql.SQLException;
 import java.util.Collection;
 import java.util.UUID;
 import java.util.function.LongConsumer;
+import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
@@ -320,7 +319,11 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
         byte[][] data = new byte[sections.size()][];
         int index = 0;
         try {
-            for (var section : sections) data[index++] = encode(section);
+            if (data.length != 0) {
+                try (var encoder = new SectionEncoder()) {
+                    for (var section : sections) data[index++] = encoder.encode(section);
+                }
+            }
             this.writeTransaction(column, sections, data, null);
         } catch (SQLException | IOException ex) {
             throw storageFailure(ex);
@@ -425,15 +428,51 @@ public final class LodSectionStorage extends SectionStorage implements AutoClose
     }
 
     private static byte[] encode(LodSectionSnapshot section) throws IOException {
-        var bytes = new ByteArrayOutputStream();
-        try (var output = new DataOutputStream(new BufferedOutputStream(new DeflaterOutputStream(bytes), SECTION_IO_BUFFER_SIZE))) {
-            var coverage = section.coverage();
-            output.writeByte(section.children());
-            output.writeByte(coverage.mode());
-            for (int index = 0; index < coverage.serializedWordCount(); index++) output.writeLong(coverage.word(index));
-            for (long voxel : section.voxels()) output.writeLong(voxel);
+        try (var encoder = new SectionEncoder()) {
+            return encoder.encode(section);
         }
-        return bytes.toByteArray();
+    }
+
+    private static final class SectionEncoder implements AutoCloseable {
+        private final ByteBuffer words = ByteBuffer.allocate(SECTION_IO_BUFFER_SIZE);
+        private final ByteArrayOutputStream encoded = new ByteArrayOutputStream();
+        private final Deflater deflater = new Deflater();
+
+        byte[] encode(LodSectionSnapshot section) throws IOException {
+            encoded.reset();
+            deflater.reset();
+            words.clear();
+            try (var output = new DeflaterOutputStream(encoded, deflater)) {
+                var coverage = section.coverage();
+                words.put(section.children()).put((byte) coverage.mode());
+                for (int i = 0; i < coverage.serializedWordCount(); i++) {
+                    if (words.remaining() < Long.BYTES) flushWords(output);
+                    words.putLong(coverage.word(i));
+                }
+
+                long[] voxels = section.voxels();
+                for (int offset = 0; offset < voxels.length; ) {
+                    if (words.remaining() < Long.BYTES) flushWords(output);
+                    int count = Math.min(voxels.length - offset, words.remaining() / Long.BYTES);
+                    words.asLongBuffer().put(voxels, offset, count);
+                    words.position(words.position() + count * Long.BYTES);
+                    offset += count;
+                }
+                flushWords(output);
+            }
+            return encoded.toByteArray();
+        }
+
+        private void flushWords(DeflaterOutputStream output) throws IOException {
+            // Preserve the former buffer's write boundaries and the compressed revision key.
+            output.write(words.array(), 0, words.position());
+            words.clear();
+        }
+
+        @Override
+        public void close() {
+            deflater.end();
+        }
     }
 
     private static LodSectionSnapshot decode(long key, byte[] data, long[] destination) throws IOException {

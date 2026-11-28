@@ -13,6 +13,7 @@ import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.nio.ByteBuffer;
@@ -145,6 +146,51 @@ class ServerSectionStorageTest {
             assertEquals(2, reader.revision(key));
             assertEquals(0x1000_0000, reader.read(key).section().voxels()[0]);
             assertThrows(IllegalStateException.class, () -> reader.commitColumn(1, List.of(snapshot)));
+        }
+    }
+
+    @Test
+    void keepsLegacyRevisionsWhenBulkEncodingUnchangedSections(@TempDir Path temp) throws Exception {
+        var path = temp.resolve("existing.sqlite");
+        int level = 4;
+        var coverages = List.of(SurfaceDataCoverage.legacy(level), SurfaceDataCoverage.raw(level),
+                SurfaceDataCoverage.legacy(level).withKnownInput(2, 0, 0).withKnownInput(31, 31, 31));
+        var random = new java.util.SplittableRandom(104729);
+        var sections = new ArrayList<LodSectionSnapshot>();
+        try (var store = new LodSectionStorage(path);
+             var connection = DriverManager.getConnection("jdbc:sqlite:" + path);
+             var insert = connection.prepareStatement("INSERT INTO section_v1(id, level, revision, data) VALUES (?, ?, 23, ?)")) {
+            for (int i = 0; i < coverages.size(); i++) {
+                var coverage = coverages.get(i);
+                long key = WorldEngine.getWorldSectionId(level, i, 0, 0);
+                var voxels = new long[WorldSection.SECTION_VOLUME];
+                for (int j = 0; j < voxels.length; j++) voxels[j] = random.nextInt(23);
+                byte children = (byte) (1 << i);
+                var old = new ByteArrayOutputStream();
+                try (var output = new DataOutputStream(new BufferedOutputStream(new DeflaterOutputStream(old), 32 * 1024))) {
+                    output.writeByte(children);
+                    output.writeByte(coverage.mode());
+                    for (int j = 0; j < coverage.serializedWordCount(); j++) output.writeLong(coverage.word(j));
+                    for (long voxel : voxels) output.writeLong(voxel);
+                }
+                insert.setLong(1, key);
+                insert.setInt(2, level);
+                insert.setBytes(3, old.toByteArray());
+                insert.executeUpdate();
+                sections.add(new LodSectionSnapshot(key, children, coverage, voxels));
+                assertArrayEquals(voxels, store.read(key).section().voxels());
+            }
+            store.commitColumn(42, sections);
+            assertTrue(store.hasColumn(42));
+            for (var section : sections) assertEquals(23, store.revision(section.key()));
+
+            var changed = sections.get(1);
+            changed.voxels()[147] ^= 4096;
+            store.commitColumn(42, sections);
+            assertEquals(24, store.revision(changed.key()));
+            assertArrayEquals(changed.voxels(), store.read(changed.key()).section().voxels());
+            assertEquals(23, store.revision(sections.get(0).key()));
+            assertEquals(23, store.revision(sections.get(2).key()));
         }
     }
 
