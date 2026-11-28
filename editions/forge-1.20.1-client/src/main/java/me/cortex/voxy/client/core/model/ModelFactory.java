@@ -326,6 +326,12 @@ public class ModelFactory {
         if (this.blendPalette.drainUploads(this.storage.modelColourBuffer)) UploadStream.INSTANCE.commit();
     }
 
+    private long atlasRevision;
+
+    public long getAtlasRevision() {
+        return this.atlasRevision;
+    }
+
     public void processUploads(long totalBudgetNanos) {
         var upload = this.uploadResults.poll();
         if (upload==null) return;
@@ -340,6 +346,7 @@ public class ModelFactory {
             do {
                 try {
                     upload.upload(this.storage);
+                    if (upload instanceof ModelBakeResultUpload) this.atlasRevision++;
                 } finally {
                     upload.free();
                 }

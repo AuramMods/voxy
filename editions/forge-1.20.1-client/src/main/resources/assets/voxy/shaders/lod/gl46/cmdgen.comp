@@ -52,6 +52,12 @@ void writeCmd(uint idx, uint instance, uint offset, uint quadCount) {
 vec4 voxyShadowBounds(vec4 bounds);
 float voxyShadowReceiverEdge(float edge);
 
+#import <voxy:lod/gl46/shadow_tiles.glsl>
+
+layout(binding = 9, std430) readonly restrict buffer DirtyShadowTiles {
+    uint dirtyShadowTiles[];
+};
+
 bool outsideShadowReceivers(SectionMeta meta, uint detail, ivec3 ipos) {
     // The metadata encloses the occupied blocks. Include face insets and voxel overhang.
     float blockScale = float(1u << detail);
@@ -64,6 +70,21 @@ bool outsideShadowReceivers(SectionMeta meta, uint detail, ivec3 ipos) {
     vec3 upper = center + radius;
     vec4 projected = voxyShadowBounds(vec4(lower.xy, upper.xy));
     if (any(greaterThan(projected.xy, vec2(1.0001))) || any(lessThan(projected.zw, vec2(-1.0001)))) return true;
+
+    if (shadowTileResolution != 0) {
+        // Dirty tiles are expanded by one texel for rasterization at tile boundaries.
+        ivec4 tiles = shadowTileRect(projected, shadowTileResolution);
+        bool coversDirtyTile = false;
+        for (int y = tiles.y; y <= tiles.w && !coversDirtyTile; ++y) {
+            for (int x = tiles.x; x <= tiles.z; ++x) {
+                if (dirtyShadowTiles[y * SHADOW_TILE_COUNT + x] != 0u) {
+                    coversDirtyTile = true;
+                    break;
+                }
+            }
+        }
+        if (!coversDirtyTile) return true;
+    }
 
     for (int i = 0; i < 4; ++i) {
         vec3 plane = shadowReceiverPlanes[i].xyz;

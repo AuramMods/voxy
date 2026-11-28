@@ -21,6 +21,11 @@ public final class NearTerrainCoverage {
     private final Long2IntOpenHashMap transitions = new Long2IntOpenHashMap();
     private GlBuffer buffer = new GlBuffer(48);
     private boolean dirty = true;
+    private long revision;
+
+    public long getRevision() {
+        return this.revision;
+    }
     private long visibilityTime;
     private long nextVisibilityRefresh = Long.MAX_VALUE;
 
@@ -110,6 +115,7 @@ public final class NearTerrainCoverage {
         if (this.dirty) {
             this.upload();
             this.dirty = false;
+            this.revision++;
         }
         viewport.nearTerrainSections = this.buffer;
         viewport.nearTerrainTime = now;

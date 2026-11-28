@@ -6,6 +6,7 @@ import me.cortex.voxy.client.core.rendering.Viewport;
 import me.cortex.voxy.client.core.rendering.hierachical.HierarchicalOcclusionTraverser;
 
 public class MDICViewport extends Viewport<MDICViewport> {
+    public GlBuffer shadowDirtyTiles;
     public final GlBuffer drawCountCallBuffer = new GlBuffer(1024).zero();
     public final GlBuffer drawCallBuffer;
     public final GlBuffer positionScratchBuffer;

@@ -1,0 +1,37 @@
+#version 450 core
+
+layout(local_size_x = 64) in;
+layout(location = 0) uniform mat4 lightFromWorld;
+layout(location = 4) uniform ivec3 baseSection;
+layout(location = 5) uniform int regionCount;
+layout(location = 6) uniform int resolution;
+
+layout(binding = 9, std430) restrict buffer DirtyShadowTiles {
+    uint dirtyShadowTiles[];
+};
+layout(binding = 10, std430) readonly restrict buffer ChangedRegions {
+    ivec4 changedRegions[];
+};
+
+vec4 voxyShadowBounds(vec4 bounds);
+#import <voxy:lod/gl46/shadow_tiles.glsl>
+
+void main() {
+    if (gl_GlobalInvocationID.x >= uint(regionCount)) return;
+    ivec4 region = changedRegions[gl_GlobalInvocationID.x];
+    float block = float(1 << region.w);
+    vec3 lower = vec3(((region.xyz << region.w) - baseSection) << 5);
+    vec3 halfSize = vec3(17.0 * block);
+    vec3 center = (lightFromWorld * vec4(lower + vec3(16.0 * block), 1.0)).xyz;
+    vec3 radius = abs(lightFromWorld[0].xyz) * halfSize.x
+                + abs(lightFromWorld[1].xyz) * halfSize.y
+                + abs(lightFromWorld[2].xyz) * halfSize.z;
+    vec4 projected = voxyShadowBounds(vec4(center.xy - radius.xy, center.xy + radius.xy));
+    if (any(greaterThan(projected.xy, vec2(1.0001))) || any(lessThan(projected.zw, vec2(-1.0001)))) return;
+    ivec4 tiles = shadowTileRect(projected, resolution);
+    for (int y = tiles.y; y <= tiles.w; ++y) {
+        for (int x = tiles.x; x <= tiles.z; ++x) {
+            atomicOr(dirtyShadowTiles[y * SHADOW_TILE_COUNT + x], 1u);
+        }
+    }
+}

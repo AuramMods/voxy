@@ -551,6 +551,13 @@ public class AsyncNodeManager {
         }
     }
 
+    private ShadowCasterChanges shadowChanges;
+
+    public ShadowCasterChanges trackShadowChanges() {
+        if (this.shadowChanges == null) this.shadowChanges = new ShadowCasterChanges();
+        return this.shadowChanges;
+    }
+
     private IntConsumer tlnAddCallback; private IntConsumer tlnRemoveCallback;
     //Render thread synchronization
     public void tick(GlBuffer nodeBuffer, NodeCleaner cleaner) {//TODO: dont pass nodeBuffer here??, do something else thats better
@@ -560,6 +567,11 @@ public class AsyncNodeManager {
         var results = (SyncResults)RESULT_HANDLE.getAndSet(this, null);//Acquire the results
         if (results == null) {//There are no new results to process, return
             return;
+        }
+
+        if (this.shadowChanges != null) {
+            this.shadowChanges.apply(results.scatterWriteLocationMap, results.scatterWriteBuffer.address,
+                    !results.tlnDelta.isEmpty());
         }
 
         //top level node add/remove

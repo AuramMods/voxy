@@ -31,6 +31,7 @@ import me.cortex.voxy.client.core.rendering.section.IUsesMeshlets;
 import me.cortex.voxy.client.core.rendering.section.backend.AbstractSectionRenderer;
 import me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICSectionRenderer;
 import me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICViewport;
+import me.cortex.voxy.client.core.rendering.ShadowDepthCache;
 import me.cortex.voxy.client.core.rendering.ShadowRenderState;
 import me.cortex.voxy.client.core.rendering.section.geometry.BasicSectionGeometryData;
 import me.cortex.voxy.client.core.rendering.section.geometry.IGeometryData;
@@ -88,6 +89,7 @@ public class VoxyRenderSystem {
     private GlFramebuffer shadowFramebuffer;
     private int shadowDepthTexture;
     private MDICViewport shadowViewport;
+    private ShadowDepthCache shadowDepthCache;
 
     private final ViewportSelector<?> viewportSelector;
 
@@ -188,6 +190,9 @@ public class VoxyRenderSystem {
 
             var sectionRenderer = backendFactory.create(this.pipeline, this.modelService.getStore(), this.geometryData);
             this.pipeline.setSectionRenderer(sectionRenderer);
+            if (sectionRenderer instanceof MDICSectionRenderer renderer && renderer.getShadowBoundsPatch() != null) {
+                this.nodeManager.trackShadowChanges();
+            }
             this.viewportSelector = new ViewportSelector<>(sectionRenderer::createViewport);
 
             {
@@ -321,6 +326,13 @@ public class VoxyRenderSystem {
             this.traversal.doTraversal(viewport);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, this.shadowFramebuffer.id);
             glViewport(0, 0, resolution, resolution);
+            if (renderer.getShadowBoundsPatch() != null
+                    && !Boolean.getBoolean("voxy.debug.disableShadowCache")) {
+                if (this.shadowDepthCache == null) this.shadowDepthCache = new ShadowDepthCache(this.properties);
+                if (this.shadowDepthCache.draw(viewport, depthTexture, this.shadowFramebuffer,
+                        this.nodeManager.trackShadowChanges(), this.shadowTerrainCoverage.getRevision(),
+                        this.modelService.factory.getAtlasRevision(), renderer, renderer.getShadowBoundsPatch())) return;
+            }
             renderer.renderShadowCasters(viewport);
         });
     }
@@ -644,6 +656,7 @@ public class VoxyRenderSystem {
             cleanup.run(() -> DownloadStream.INSTANCE.flushWaitClear());
             if (this.shadowFramebuffer != null) cleanup.run(this.shadowFramebuffer::free);
             if (this.shadowViewport != null) cleanup.run(this.shadowViewport::delete);
+            if (this.shadowDepthCache != null) cleanup.run(this.shadowDepthCache::close);
             if (this.shadowTerrainCoverage != null) cleanup.run(this.shadowTerrainCoverage::free);
             if (this.nearTerrainCoverage != null) cleanup.run(this.nearTerrainCoverage::free);
             if (this.viewportSelector != null) cleanup.run(this.viewportSelector::free);

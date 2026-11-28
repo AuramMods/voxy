@@ -34,6 +34,13 @@ layout(location = 7) in flat uint quadDebug;
 
 
 #ifndef PATCHED_SHADER
+#if defined VOXY_SHADOW_PASS && defined VOXY_SHADOW_BOUNDS
+#import <voxy:lod/gl46/shadow_tiles.glsl>
+layout(binding = 9, std430) readonly restrict buffer DirtyShadowTiles {
+    uint dirtyShadowTiles[];
+};
+#endif
+
 #ifndef VOXY_SHADOW_PASS
 layout(location = 0) out vec4 outColour;
 #endif
@@ -361,6 +368,10 @@ void main() {
 
     #ifdef VOXY_SHADOW_PASS
     if (nearSectionState() != 0) discard;
+    #ifdef VOXY_SHADOW_BOUNDS
+    if (shadowTileResolution != 0
+            && dirtyShadowTiles[shadowTileIndex(ivec2(gl_FragCoord.xy), shadowTileResolution)] == 0u) discard;
+    #endif
     if (!useDiscard()) return;
     #else
     #ifdef TRANSLUCENT
